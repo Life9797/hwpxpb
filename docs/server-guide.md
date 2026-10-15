@@ -14,8 +14,11 @@ API_KEY=비밀값 docker compose up -d --build
 
 Docker 없이:
 ```bash
-npm ci && RHWP_BIN=/경로/rhwp TEMPLATE_DIR=./templates node server/src/main.js
+pip install ./server                     # Python 3.9 이상. 다른 패키지는 설치하지 않음
+RHWP_BIN=/경로/rhwp TEMPLATE_DIR=./templates hwpxpb serve
+# 설치 없이: cd server && python3 -m hwpxpb serve
 ```
+저장소에서 실행하면 `pb/dist` 의 에디터 화면을 자동으로 씁니다.
 PDF 출력에는 rhwp 명령행 도구(`cargo build --release --bin rhwp`, rhwp v0.8.7)와 한글 글꼴(`fonts-nanum` 등)이 필요합니다.
 
 | 환경변수 | 기본값 | 설명 |
@@ -25,7 +28,7 @@ PDF 출력에는 rhwp 명령행 도구(`cargo build --release --bin rhwp`, rhwp 
 | `API_KEY` | (없음) | 설정하면 모든 `/api` 요청에 `X-API-Key` 헤더 필요 |
 | `RHWP_BIN` | `rhwp` | PDF 변환기 경로 |
 | `FONT_PATHS` | | PDF 글꼴 폴더 (`:` 로 여러 개) |
-| `WEB_DIR` | `pb/dist` (있으면) | 웹 에디터 화면 폴더. 빈 문자열이면 화면 없이 API 만 |
+| `WEB_DIR` | 저장소의 `pb/dist` (도커: `/app/web`) | 웹 에디터 화면 폴더. 빈 문자열이면 화면 없이 API 만 |
 | `PDF_FALLBACK_SANS` / `_SERIF` / `_MONO` | Noto CJK KR | 문서 글꼴이 서버에 없을 때 쓸 글꼴 이름 (예: `NanumGothic`). 한글 글꼴이 하나도 없으면 PDF 에 글자가 빈칸으로 나옵니다 |
 
 ## 2. 웹 에디터 (브라우저로 접속)
@@ -51,7 +54,7 @@ Chrome·Edge 에서는 Ctrl+Tab 이 탭 전환에 먼저 쓰여 화면까지 오
 - 등록한 양식을 바로 열기: `http://서버:8080/?template=rx01` (`&mode=edit` 자유 편집, `&comboSep=|` 드롭다운 구분자)
 - `API_KEY` 를 설정한 서버에서는 에디터 화면 파일은 키 없이 열리고, 양식을 불러올 때만 키가 필요합니다: `?template=rx01&key=비밀값`
 - 파일은 브라우저 안에서만 처리되고 서버로 올라가지 않습니다.
-- 에디터 화면은 이미지에 들어 있습니다. Docker 없이 실행할 때는 `scripts/build-pb-web.sh` 로 `pb/dist` 를 만들면 자동으로 쓰고, 다른 위치는 `WEB_DIR` 로 지정합니다.
+- 에디터 화면은 저장소의 `pb/dist` 를 씁니다 (도커 이미지에도 들어 있음). 다른 위치는 `WEB_DIR` 로 지정합니다.
 
 ## 3. HTTP API
 

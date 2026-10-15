@@ -8,9 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 브라우저 엔진(engine/)도 시험하고, Python 엔진과 결과가 같은지 비교한다
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Python 서버 시험
+        working-directory: server
+        run: python -m unittest discover -s tests -t . -v

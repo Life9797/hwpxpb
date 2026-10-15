@@ -1,7 +1,7 @@
 {
   "name": "hwpxpb",
   "private": true,
-  "workspaces": ["engine", "server"],
+  "workspaces": ["engine"],
   "scripts": {
     "test": "npm test --workspaces"
   }

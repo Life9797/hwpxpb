@@ -1,7 +1,7 @@
 node_modules
 .build
-pb/dist
 pb/ocx/bin
 pb/ocx/obj
 docs
 .git
+**/__pycache__
