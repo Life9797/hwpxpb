@@ -4,7 +4,7 @@
   "description": "HWPX 양식(누름틀·체크박스·라디오·드롭다운) 값 대입/추출 엔진. 서식은 건드리지 않는다.",
   "type": "module",
   "main": "src/index.js",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "test": "node --test test/*.test.js"
   },

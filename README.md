@@ -42,5 +42,5 @@ Python 엔진(`server/hwpxpb/engine.py`)과 브라우저 엔진(`engine/src/inde
 (빌드에는 Rust·wasm-pack·Node 가 필요하지만, 서버 실행과 OCX 빌드에는 필요 없습니다).
 
 ## 라이선스
-이 저장소의 라이선스는 아직 정하지 않았습니다. 함께 쓰는 rhwp 는 MIT (Copyright Edward Kim) 이며, 배포본에 그 고지를 포함합니다.
+이 저장소는 MIT 라이선스입니다 ([LICENSE](LICENSE)). 함께 쓰는 rhwp 는 MIT (Copyright Edward Kim) 이며, 배포본에 그 고지를 포함합니다.
 이 프로젝트는 한글과컴퓨터와 관련이 없습니다.
