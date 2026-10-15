@@ -11,6 +11,8 @@
 //   &mode=edit                          자유 편집으로 열기 (기본: 양식 입력)
 //   &key=<API 키>                       서버에 API_KEY 를 설정했을 때
 //   &comboSep=|                         드롭다운 코드 구분자 (기본 ":")
+import { DEFAULT_KEYS, eventKey } from './bridge.js';
+
 if (!window.chrome?.webview) {
   document.body.classList.add('standalone');
 
@@ -98,10 +100,57 @@ if (!window.chrome?.webview) {
     say('저장했습니다');
   }
 
+  // ---- 이동 키 설정 (이 브라우저에 저장) ----
+  const KEYS_STORE = 'hwpxpb.keys';
+  const prettyKey = (k) =>
+    k
+      .split('+')
+      .map((p) => (p.length === 1 ? p.toUpperCase() : p[0].toUpperCase() + p.slice(1)))
+      .join('+');
+  const loadKeys = () => {
+    try {
+      return { ...DEFAULT_KEYS, ...JSON.parse(localStorage.getItem(KEYS_STORE) || '{}') };
+    } catch {
+      return { ...DEFAULT_KEYS };
+    }
+  };
+  const keyInputs = () => Array.from(document.querySelectorAll('#keys-dialog input[data-key]'));
+  const fillKeyInputs = (map) => keyInputs().forEach((i) => (i.value = map[i.dataset.key] ?? ''));
+  for (const input of keyInputs()) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' || (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey)) return;
+      e.preventDefault();
+      if (e.key === 'Backspace' || e.key === 'Delete') input.value = '';
+      else if (eventKey(e)) input.value = prettyKey(eventKey(e));
+    });
+  }
+  $('keys-default').onclick = () => fillKeyInputs(DEFAULT_KEYS);
+  $('btn-keys').onclick = async () => {
+    fillKeyInputs((await call('getKeys')).keys);
+    $('keys-dialog').showModal();
+  };
+  $('keys-dialog').addEventListener('close', () =>
+    busy(async () => {
+      if ($('keys-dialog').returnValue !== 'ok') return;
+      const map = Object.fromEntries(keyInputs().map((i) => [i.dataset.key, i.value]));
+      await call('setKeys', JSON.stringify(map));
+      try {
+        localStorage.setItem(KEYS_STORE, JSON.stringify(map));
+      } catch {} // 저장소를 못 쓰면 이번 화면에서만 적용
+      say('이동 키를 바꿨습니다');
+    }),
+  );
+
   async function ready() {
     while (!window.hwpBridgeReady) await new Promise((r) => setTimeout(r, 50));
+    try {
+      await call('setKeys', JSON.stringify(loadKeys()));
+    } catch {
+      await call('setKeys', JSON.stringify(DEFAULT_KEYS)); // 저장된 값이 잘못됐으면 기본값
+    }
     $('btn-open').disabled = false;
     $('sel-mode').disabled = false;
+    $('btn-keys').disabled = false;
     try {
       document.querySelector('#editor iframe')?.contentWindow?.addEventListener('keydown', onKey, true);
     } catch {} // 다른 출처면 건너뜀

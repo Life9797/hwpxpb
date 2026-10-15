@@ -18,6 +18,94 @@ const state = {
   mode: 'form', // form | edit | view
 };
 
+// ---- 양식 모드의 이동 키 -------------------------------------------------------
+// nextObject/prevObject: 선택 개체(체크박스·라디오·드롭다운) 사이 이동. 고른 개체는 Space/Enter 로 체크·선택
+// nextField/prevField:   누름틀 사이 이동
+// 키 이름 예: "Ctrl+Tab", "Ctrl+Shift+Tab", "F8", "Alt+N". 빈 문자열이면 그 기능을 끈다.
+export const DEFAULT_KEYS = Object.freeze({
+  nextObject: 'Ctrl+Tab',
+  prevObject: 'Ctrl+Shift+Tab',
+  nextField: 'Tab',
+  prevField: 'Shift+Tab',
+});
+const keys = { ...DEFAULT_KEYS };
+
+const MOD_ORDER = ['ctrl', 'alt', 'shift', 'meta'];
+const MOD_ALIAS = { control: 'ctrl', ctl: 'ctrl', option: 'alt', cmd: 'meta', command: 'meta', win: 'meta' };
+
+/** "ctrl + tab" → "ctrl+tab" (비교용) */
+function normalizeKey(text) {
+  const parts = String(text ?? '')
+    .split('+')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+    .map((p) => MOD_ALIAS[p] ?? p);
+  if (parts.length === 0) return '';
+  const key = parts.pop();
+  const mods = MOD_ORDER.filter((m) => parts.includes(m));
+  return [...mods, key === 'spacebar' ? 'space' : key].join('+');
+}
+
+/** 키 이벤트 → "ctrl+shift+tab" */
+export function eventKey(e) {
+  let key = e.key === ' ' ? 'space' : String(e.key).toLowerCase();
+  if (['control', 'shift', 'alt', 'meta', 'process', 'dead', 'unidentified'].includes(key)) return '';
+  // 한글 입력 중이거나 Shift 로 글자가 바뀌어도 같은 키로 보이게 물리 키 이름을 쓴다
+  if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
+  else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5);
+  return [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta', key].filter(Boolean).join('+');
+}
+
+function onEditorKey(e) {
+  if (state.mode !== 'form') return;
+  // 바깥 화면의 입력 칸(키 설정 창 등)에서 누른 키는 건드리지 않는다
+  if (e.target?.ownerDocument === document && e.target.closest?.('input, select, textarea, dialog')) return;
+  const pressed = eventKey(e);
+  if (!pressed) return;
+  const action = Object.keys(keys).find((k) => keys[k] && normalizeKey(keys[k]) === pressed);
+  if (!action) return;
+  const nav = formNav();
+  if (!nav) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (action === 'nextObject') nav.moveObject(1);
+  else if (action === 'prevObject') nav.moveObject(-1);
+  else if (action === 'nextField') nav.moveField(1);
+  else if (action === 'prevField') nav.moveField(-1);
+}
+
+/** 에디터(rhwp-studio)의 양식 이동 기능 (patches/rhwp/0002) */
+const formNav = () => studioWindow()?.rhwpStudio?.formNavigation ?? null;
+
+function studioWindow() {
+  try {
+    return document.querySelector('#editor iframe')?.contentWindow ?? null;
+  } catch {
+    return null; // 다른 출처
+  }
+}
+
+function hookEditorKeys() {
+  window.addEventListener('keydown', onEditorKeyOnce, true);
+  const frame = document.querySelector('#editor iframe');
+  const attach = () => {
+    const w = studioWindow();
+    if (w && !w.__hwpxpbKeys) {
+      w.__hwpxpbKeys = true;
+      w.addEventListener('keydown', onEditorKeyOnce, true);
+    }
+  };
+  attach();
+  frame?.addEventListener('load', attach);
+}
+// 같은 이벤트가 바깥·안쪽 창에서 두 번 처리되지 않게
+const seen = new WeakSet();
+function onEditorKeyOnce(e) {
+  if (seen.has(e)) return;
+  seen.add(e);
+  onEditorKey(e);
+}
+
 const toB64 = (u8) => {
   let s = '';
   for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
@@ -144,6 +232,31 @@ const api = {
     return { ok: true, pages: pages.length };
   },
 
+  /**
+   * 양식 모드의 이동 키를 바꾼다. 예: {nextObject:"F8", prevObject:"Shift+F8"}
+   * 빠진 항목은 그대로, 빈 문자열은 끔, null 이면 기본값. 결과: 지금 키 설정
+   */
+  async setKeys(map) {
+    if (typeof map === 'string') map = JSON.parse(map || '{}');
+    for (const [k, v] of Object.entries(map ?? {})) {
+      if (!(k in DEFAULT_KEYS)) throw new Error(`알 수 없는 키 항목: ${k} (${Object.keys(DEFAULT_KEYS).join(', ')})`);
+      if (v != null && v !== '' && !normalizeKey(v)) throw new Error(`키 이름이 잘못됐습니다: ${v}`);
+      keys[k] = v == null ? DEFAULT_KEYS[k] : String(v);
+    }
+    return { ok: true, keys: { ...keys } };
+  },
+
+  async getKeys() {
+    return { ok: true, keys: { ...keys }, defaults: { ...DEFAULT_KEYS } };
+  },
+
+  /** 다음(+1)/이전(-1) 선택 개체로 이동 (키 대신 버튼 등에서 부를 때) */
+  async moveObject(delta = 1) {
+    const nav = formNav();
+    if (!nav) throw new Error('에디터가 키보드 이동을 지원하지 않습니다 (rhwp 패치 0002 필요)');
+    return { ok: Boolean(nav.moveObject(Number(delta) < 0 ? -1 : 1)) };
+  },
+
   /** 인쇄 대화상자(미리보기)를 연다. 브라우저·WebView2 공통 */
   async print(comboSep = ':') {
     const r = await api.preparePrint(comboSep);
@@ -172,5 +285,6 @@ state.studio = await createStudio('#editor', {
   plugins: ['hwpctrl'],
   chrome: { menu: false, toolbar: false, statusbar: false },
 });
+hookEditorKeys();
 window.hwpBridgeReady = true;
 emit('ready');

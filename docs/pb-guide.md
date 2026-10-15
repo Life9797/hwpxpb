@@ -41,6 +41,8 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 | `PrintTo(printerName, copies)` | 대화상자 없이 바로 인쇄. `printerName` 이 `""` 이면 기본 프린터 |
 | `GetPrinters()` | 설치된 프린터 이름 (줄마다 하나) |
 | `GetDefaultPrinter()` | 기본 프린터 이름 |
+| `SetKeys(nextObject, prevObject, nextField, prevField)` | 양식 입력에서 옮겨 다닐 키. `""` 는 그대로, `"none"` 은 끔 (아래 8절) |
+| `MoveObject(delta)` | 다음(1)/이전(-1) 선택 개체로 이동. 버튼 등에서 부를 때 |
 | `SetMode(mode)` | 모드 바꾸기 |
 | `LastError` | 마지막 오류 메시지 |
 | `IsReady` | 에디터 준비 여부 (`ready` 이벤트 이후 true) |
@@ -114,3 +116,24 @@ ole_hwp.object.SetFieldValue("REGION_CD", "02", "|")
 - 큰 문서는 `Open`/`SaveAs` 처럼 파일 경로로 주고받는 쪽이 빠릅니다.
 - `ready` 이벤트 전에 부르면 실패합니다 (`IsReady` 로 확인).
 - WebView2 사용자 데이터는 `%LOCALAPPDATA%\hwpxpb\WebView2` 에 저장됩니다.
+
+## 8. 키보드로 옮겨 다니기 (양식 입력 모드)
+
+| 키 (기본) | 동작 |
+|---|---|
+| Tab / Shift+Tab | 다음/이전 누름틀 |
+| Ctrl+Tab / Ctrl+Shift+Tab | 다음/이전 선택 개체 (체크박스·라디오·드롭다운). 고른 개체에 파란 테두리 |
+| Space 또는 Enter | 고른 체크박스 켜기/끄기, 라디오 선택, 드롭다운 목록 열기 |
+| ↑ ↓, Enter, Esc | 열린 드롭다운 목록에서 고르기, 정하기, 닫기 |
+| Esc | 선택 개체 고르기 해제 |
+
+선택 개체는 쪽 → 위에서 아래 → 왼쪽에서 오른쪽 순서로 옮겨 가고, 처음에는 커서 다음 개체부터 고릅니다.
+
+키는 사용자가 바꿀 수 있습니다. 화면을 열 때(ready 이벤트 뒤) 부르고, 사용자별 값은 PB 쪽(INI·DB)에 두면 됩니다.
+```powerscript
+// 선택 개체 이동을 F8 / Shift+F8 로, 누름틀은 그대로
+ole_hwp.object.SetKeys("F8", "Shift+F8", "", "")
+// 누름틀 이동을 Enter 로 (Tab 도 계속 됨)
+ole_hwp.object.SetKeys("", "", "Enter", "Shift+Enter")
+```
+키 이름: `Ctrl`, `Alt`, `Shift` 와 키를 `+` 로 잇습니다. 예: `Ctrl+Tab`, `F8`, `Alt+N`, `Ctrl+Down`, `PageDown`.

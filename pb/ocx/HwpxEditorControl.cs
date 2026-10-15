@@ -49,6 +49,9 @@ namespace Hwpxpb
         [DispId(25)] bool PrintTo(string printerName, int copies);
         [DispId(26)] string GetPrinters();
         [DispId(27)] string GetDefaultPrinter();
+        // 양식 입력 이동 키 (예: "Ctrl+Tab", "F8"). "" 이면 그대로, "none" 이면 끔
+        [DispId(28)] bool SetKeys(string nextObject, string prevObject, string nextField, string prevField);
+        [DispId(29)] bool MoveObject(int delta);
     }
 
     [ComVisible(true)]
@@ -222,6 +225,31 @@ namespace Hwpxpb
                 return true;
             }
             catch (Exception ex) { return Fail(ex.Message); }
+        }
+
+        /// <summary>
+        /// 양식 입력에서 옮겨 다니는 키. 선택 개체(체크박스·라디오·드롭다운)와 누름틀 각각 다음/이전.
+        /// 기본: Ctrl+Tab / Ctrl+Shift+Tab / Tab / Shift+Tab. "" 이면 바꾸지 않고 "none" 이면 끈다.
+        /// </summary>
+        public bool SetKeys(string nextObject, string prevObject, string nextField, string prevField)
+        {
+            var map = new Dictionary<string, object>();
+            void Put(string name, string key)
+            {
+                if (string.IsNullOrEmpty(key)) return;
+                map[name] = string.Equals(key, "none", StringComparison.OrdinalIgnoreCase) ? "" : key;
+            }
+            Put("nextObject", nextObject);
+            Put("prevObject", prevObject);
+            Put("nextField", nextField);
+            Put("prevField", prevField);
+            return Ok(Call("setKeys", _json.Serialize(map)));
+        }
+
+        /// <summary>다음(1)/이전(-1) 선택 개체로 옮긴다. 옮겼으면 true</summary>
+        public bool MoveObject(int delta)
+        {
+            return Ok(Call("moveObject", delta < 0 ? "-1" : "1"));
         }
 
         /// <summary>인쇄 대화상자(미리보기)를 띄운다. 프린터·매수·쪽 범위는 사용자가 고른다.</summary>

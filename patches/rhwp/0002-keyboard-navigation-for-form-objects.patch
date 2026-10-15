@@ -1,0 +1,718 @@
+diff --git a/rhwp-studio/src/core/wasm-bridge.ts b/rhwp-studio/src/core/wasm-bridge.ts
+index 58162bab..88dd6ca1 100644
+--- a/rhwp-studio/src/core/wasm-bridge.ts
++++ b/rhwp-studio/src/core/wasm-bridge.ts
+@@ -3751,6 +3751,18 @@ export class WasmBridge {
+     return JSON.parse((this.doc as any).getFormObjectAt(pageNum, x, y));
+   }
+ 
++  /** 셀 내부 양식 개체 상세 정보. getFormObjectInfo 와 같은 모양 */
++  getFormObjectInfoInCell(sec: number, tablePara: number, tableCi: number, cellIdx: number, cellPara: number, formCi: number): any {
++    if (!this.doc || typeof (this.doc as any).getFormObjectInfoInCell !== 'function') return { ok: false };
++    return JSON.parse((this.doc as any).getFormObjectInfoInCell(sec, tablePara, tableCi, cellIdx, cellPara, formCi));
++  }
++
++  /** 쪽 안의 모든 양식 개체 (키보드 이동용). */
++  getFormObjectsOnPage(pageNum: number): import('./types').FormObjectHitResult[] {
++    if (!this.doc || typeof (this.doc as any).getFormObjectsOnPage !== 'function') return [];
++    return JSON.parse((this.doc as any).getFormObjectsOnPage(pageNum));
++  }
++
+   /** 양식 개체 값을 조회한다. */
+   getFormValue(sec: number, para: number, ci: number): import('./types').FormValueResult {
+     if (!this.doc || typeof (this.doc as any).getFormValue !== 'function') return { ok: false };
+diff --git a/rhwp-studio/src/engine/input-handler-keyboard.ts b/rhwp-studio/src/engine/input-handler-keyboard.ts
+index 7fd48f99..6209fb71 100755
+--- a/rhwp-studio/src/engine/input-handler-keyboard.ts
++++ b/rhwp-studio/src/engine/input-handler-keyboard.ts
+@@ -697,6 +697,9 @@ function hitTestAfterPageScroll(
+ export function onKeyDown(this: any, e: KeyboardEvent): void {
+   if (!this.active) return;
+ 
++  // 키보드로 고른 양식 개체(체크박스·라디오·드롭다운)가 있으면 Space/Enter/Esc/화살표를 먼저 처리
++  if (this.handleFormObjectFocusKey?.(e)) return;
++
+   // 이전 셀 문자 단축키의 compositionend가 브라우저 focus 이동으로 누락됐더라도 다음
+   // 물리 입력까지 억제 상태가 새지 않게 한다. 현재 S/M이면 아래 resolver가 다시 arm한다.
+   this._cellBlockLetterImeGuard?.reset();
+diff --git a/rhwp-studio/src/engine/input-handler-mouse.ts b/rhwp-studio/src/engine/input-handler-mouse.ts
+index a615c7cb..84e6fe91 100644
+--- a/rhwp-studio/src/engine/input-handler-mouse.ts
++++ b/rhwp-studio/src/engine/input-handler-mouse.ts
+@@ -298,6 +298,7 @@ function promoteCellSelectionDragCandidate(this: any, e: MouseEvent): boolean {
+ 
+ export function onClick(this: any, e: MouseEvent): void {
+   rememberHyperlinkClick(this, e);
++  this.clearFormObjectFocus?.();
+   if ((this.wasm?.pageCount ?? 0) <= 0) {
+     return;
+   }
+diff --git a/rhwp-studio/src/engine/input-handler.ts b/rhwp-studio/src/engine/input-handler.ts
+index 043ee77e..4a8c87e9 100644
+--- a/rhwp-studio/src/engine/input-handler.ts
++++ b/rhwp-studio/src/engine/input-handler.ts
+@@ -668,6 +668,7 @@ export class InputHandler {
+ 
+     // 배율이나 자동 열 수가 바뀌면 페이지 기준 오버레이도 같은 확정 좌표로 옮긴다.
+     eventBus.on('zoom-changed', () => this.updateViewportOverlayPositions());
++    eventBus.on('zoom-changed', () => this.positionFormObjectFocus());
+ 
+     eventBus.on('document-view-changed', () => {
+       if (!this.active) return;
+@@ -4420,6 +4421,7 @@ export class InputHandler {
+   }
+ 
+   deactivate(): void {
++    this.clearFormObjectFocus();
+     this.flushDeferredPaginationIfNeeded('before-deactivate', false);
+     this.active = false;
+     // 문서 교체와 mutation renderer 선택이 경합해 layout 완료 이벤트가 생략돼도
+@@ -4629,6 +4631,7 @@ export class InputHandler {
+ 
+   moveToAdjacentFormField(delta: number): boolean {
+     if (this.editMode !== 'form') return false;
++    this.clearFormObjectFocus();
+     const currentInfo = this.getFormFieldInfoAt(this.cursor.getPosition());
+     const currentFieldId = currentInfo?.fieldId;
+     const currentKey = this.formFieldSortKey(this.cursor.getPosition());
+@@ -6021,6 +6024,174 @@ export class InputHandler {
+       : undefined;
+   }
+ 
++  // ─── 키보드로 양식 개체 옮겨 다니기 ─────────────────────────────
++  // 체크박스·라디오·드롭다운·입력 상자는 마우스로만 고를 수 있었다. 양식 모드에서
++  // moveToAdjacentFormObject(±1) 로 개체를 차례로 고르고(파란 테두리), Space/Enter 로
++  // 체크·선택·목록 열기, 목록은 ↑↓·Enter·Esc 로 고른다. 어떤 키로 옮길지는 호스트가 정한다.
++  private focusedFormObject: { hit: FormObjectHitResult; pageIdx: number } | null = null;
++  private formFocusBox: HTMLElement | null = null;
++
++  private listKeyboardFormObjects(): Array<{ hit: FormObjectHitResult; pageIdx: number }> {
++    const out: Array<{ hit: FormObjectHitResult; pageIdx: number }> = [];
++    const pages = this.wasm.pageCount ?? 0;
++    for (let p = 0; p < pages; p++) {
++      for (const hit of this.wasm.getFormObjectsOnPage(p)) {
++        if (!hit.found || !hit.bbox || !hit.formType || hit.formType === 'PushButton') continue;
++        out.push({ hit, pageIdx: p });
++      }
++    }
++    // 쪽 → 위에서 아래 → 왼쪽에서 오른쪽 (높이 절반 안쪽 차이는 같은 줄로 본다)
++    out.sort((a, b) => {
++      if (a.pageIdx !== b.pageIdx) return a.pageIdx - b.pageIdx;
++      const ab = a.hit.bbox!, bb = b.hit.bbox!;
++      if (Math.abs(ab.y - bb.y) > Math.min(ab.h, bb.h) / 2) return ab.y - bb.y;
++      return ab.x - bb.x;
++    });
++    return out;
++  }
++
++  private sameFormObject(a: FormObjectHitResult, b: FormObjectHitResult): boolean {
++    return a.sec === b.sec && a.para === b.para && a.ci === b.ci
++      && (a.inCell ?? false) === (b.inCell ?? false)
++      && a.tableCi === b.tableCi && a.cellIdx === b.cellIdx && a.cellPara === b.cellPara;
++  }
++
++  /** 다음(+1)/이전(-1) 양식 개체로 옮긴다. 양식 모드에서만. 옮겼으면 true */
++  moveToAdjacentFormObject(delta: number): boolean {
++    if (this.editMode !== 'form') return false;
++    const list = this.listKeyboardFormObjects();
++    if (list.length === 0) return false;
++    const cur = this.focusedFormObject;
++    const idx = cur ? list.findIndex((t) => this.sameFormObject(t.hit, cur.hit)) : -1;
++    let next: number;
++    if (idx >= 0) {
++      next = (idx + (delta >= 0 ? 1 : -1) + list.length) % list.length;
++    } else {
++      // 처음 고를 때는 커서 위치 다음(또는 앞)의 개체부터
++      const r = this.cursor.getRect();
++      const after = (t: { hit: FormObjectHitResult; pageIdx: number }) => {
++        if (!r) return true;
++        const b = t.hit.bbox!;
++        if (t.pageIdx !== r.pageIndex) return t.pageIdx > r.pageIndex;
++        if (Math.abs(b.y + b.h / 2 - (r.y + r.height / 2)) > Math.max(b.h, r.height) / 2) return b.y + b.h / 2 > r.y + r.height / 2;
++        return b.x >= r.x;
++      };
++      if (delta >= 0) {
++        next = list.findIndex(after);
++        if (next < 0) next = 0;
++      } else {
++        next = list.length - 1;
++        for (let i = list.length - 1; i >= 0; i--) if (!after(list[i])) { next = i; break; }
++      }
++    }
++    this.removeFormOverlay();
++    this.focusedFormObject = list[next];
++    this.positionFormObjectFocus(true);
++    this.focusTextarea();
++    this.eventBus.emit('form-object-focus-changed', list[next].hit);
++    return true;
++  }
++
++  /** 지금 키보드로 고른 양식 개체 (없으면 null) */
++  getFocusedFormObject(): FormObjectHitResult | null {
++    return this.focusedFormObject?.hit ?? null;
++  }
++
++  clearFormObjectFocus(): void {
++    this.focusedFormObject = null;
++    if (this.formFocusBox) {
++      try { this.formFocusBox.remove(); } catch { /* 이미 제거됨 */ }
++      this.formFocusBox = null;
++    }
++  }
++
++  private positionFormObjectFocus(reveal = false): void {
++    const f = this.focusedFormObject;
++    if (!f?.hit.bbox) return;
++    const rect = this.formBboxToOverlayRect(f.hit.bbox, f.pageIdx);
++    if (!this.formFocusBox) {
++      const box = document.createElement('div');
++      box.className = 'form-object-focus';
++      (this.container.querySelector('#scroll-content') ?? this.container).appendChild(box);
++      this.formFocusBox = box;
++    }
++    const pad = 3;
++    Object.assign(this.formFocusBox.style, {
++      left: `${rect.left - pad}px`,
++      top: `${rect.top - pad}px`,
++      width: `${rect.width + pad * 2}px`,
++      height: `${rect.height + pad * 2}px`,
++    });
++    if (reveal) this.formFocusBox.scrollIntoView({ block: 'nearest', inline: 'nearest' });
++  }
++
++  /** 고른 개체를 누른 것처럼 처리 (체크 토글, 라디오 선택, 목록 열기) */
++  private activateFocusedFormObject(): void {
++    const f = this.focusedFormObject;
++    if (!f?.hit.bbox) return;
++    const b = f.hit.bbox;
++    // 값이 바뀌었을 수 있으니 같은 자리에서 다시 읽는다
++    const fresh = this.wasm.getFormObjectAt(f.pageIdx, b.x + b.w / 2, b.y + b.h / 2);
++    const hit = fresh.found && this.sameFormObject(fresh, f.hit) ? fresh : f.hit;
++    this.focusedFormObject = { hit, pageIdx: f.pageIdx };
++    this.handleFormObjectClick(hit, f.pageIdx, this.viewportManager.getZoom());
++    if (hit.formType === 'ComboBox' && this.formOverlay) {
++      const rows = Array.from(this.formOverlay.querySelectorAll<HTMLElement>('.form-combo-item'));
++      const sel = rows.find((r) => r.classList.contains('selected')) ?? rows[0];
++      sel?.classList.add('kb-active');
++      sel?.scrollIntoView({ block: 'nearest' });
++    }
++    if (hit.formType === 'Edit') return; // 입력 상자에 포커스가 간다
++    this.focusTextarea();
++  }
++
++  /** onKeyDown 앞단: 키보드로 고른 개체와 열린 드롭다운 목록의 키를 처리. 처리했으면 true */
++  handleFormObjectFocusKey(e: KeyboardEvent): boolean {
++    const dropdown = this.formOverlay?.classList.contains('form-combo-dropdown') ? this.formOverlay : null;
++    if (dropdown && !e.ctrlKey && !e.altKey && !e.metaKey) {
++      const rows = Array.from(dropdown.querySelectorAll<HTMLElement>('.form-combo-item'));
++      let i = rows.findIndex((r) => r.classList.contains('kb-active'));
++      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
++        e.preventDefault();
++        if (i < 0) i = rows.findIndex((r) => r.classList.contains('selected'));
++        rows[i]?.classList.remove('kb-active');
++        i = Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
++        rows[i]?.classList.add('kb-active');
++        rows[i]?.scrollIntoView({ block: 'nearest' });
++        return true;
++      }
++      if (e.key === 'Enter' || e.key === ' ') {
++        e.preventDefault();
++        rows[i]?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
++        this.removeFormOverlay();
++        this.focusTextarea();
++        return true;
++      }
++      if (e.key === 'Escape') {
++        e.preventDefault();
++        this.removeFormOverlay();
++        this.focusTextarea();
++        return true;
++      }
++    }
++    if (!this.focusedFormObject) return false;
++    if (e.isComposing || e.keyCode === 229) return false;
++    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return false;
++    if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === ' ' || e.key === 'Enter')) {
++      e.preventDefault();
++      this.activateFocusedFormObject();
++      return true;
++    }
++    if (e.key === 'Escape') {
++      e.preventDefault();
++      this.clearFormObjectFocus();
++      return true;
++    }
++    // 다른 키는 개체 선택을 풀고 원래대로 처리 (Tab → 누름틀 이동 등)
++    this.clearFormObjectFocus();
++    return false;
++  }
++
+   /** 양식 개체 클릭 처리 */
+   handleFormObjectClick(formHit: FormObjectHitResult, pageIdx: number, _zoom: number): void {
+     if (!formHit.found || formHit.sec === undefined || formHit.para === undefined || formHit.ci === undefined) return;
+@@ -6056,7 +6227,7 @@ export class InputHandler {
+       }
+       case 'RadioButton': {
+         // 라디오 버튼: 같은 그룹 내 다른 라디오 버튼 해제 후 선택
+-        this.handleRadioButtonClick(sec, para, ci);
++        this.handleRadioButtonClick(formHit);
+         break;
+       }
+       case 'PushButton': {
+@@ -6074,40 +6245,60 @@ export class InputHandler {
+     }
+   }
+ 
+-  /** 라디오 버튼 클릭: 같은 그룹 내 다른 라디오 버튼 해제 */
+-  private handleRadioButtonClick(sec: number, para: number, ci: number): void {
+-    // 현재 클릭된 라디오 버튼의 그룹 이름 조회
+-    const info = this.wasm.getFormObjectInfo(sec, para, ci);
+-    if (!info.ok) return;
++  /** 양식 개체 상세 정보 (표 칸 안이면 칸 경로로 읽는다) */
++  private formObjectInfo(hit: FormObjectHitResult): any {
++    const { sec, para, ci } = hit;
++    if (sec === undefined || para === undefined || ci === undefined) return { ok: false };
++    const cell = this.formInCellLoc(hit);
++    return cell
++      ? this.wasm.getFormObjectInfoInCell(sec, cell.tablePara, cell.tableCi, cell.cellIdx, cell.cellPara, ci)
++      : this.wasm.getFormObjectInfo(sec, para, ci);
++  }
+ 
+-    const groupName = info.properties?.['GroupName'] ?? '';
++  /** 양식 개체 값 쓰기 (표 칸 안이면 칸 경로로) */
++  private setFormObjectValue(hit: FormObjectHitResult, valueJson: string): void {
++    const cell = this.formInCellLoc(hit);
++    if (cell) {
++      this.wasm.setFormValueInCell(hit.sec!, cell.tablePara, cell.tableCi, cell.cellIdx, cell.cellPara, hit.ci!, valueJson);
++    } else {
++      this.wasm.setFormValue(hit.sec!, hit.para!, hit.ci!, valueJson);
++    }
++  }
++
++  /**
++   * 라디오 버튼 클릭: 같은 그룹의 다른 라디오 버튼을 해제하고 이것을 선택.
++   * 그룹 이름은 HWP 의 GroupName, HWPX 의 RadioGroupName. 표 칸 안·다른 문단의 버튼도 찾는다.
++   */
++  private handleRadioButtonClick(hit: FormObjectHitResult): void {
++    const info = this.formObjectInfo(hit);
++    if (!info.ok) return;
++    const groupOf = (i: any) => i.properties?.['GroupName'] || i.properties?.['RadioGroupName'] || '';
++    const groupName = groupOf(info);
+     // [Task #2374] 그룹 해제+선택은 다중 쓰기 — 이전 값을 캡처해 1 엔트리로 원자 기록
+     // (개별 기록 시 undo 가 해제만 복원하는 반쪽 상태를 만든다).
+     const changes: FormValueTarget[] = [];
+-
+-    // 같은 문단 내 다른 라디오 버튼 찾아서 해제
+-    // (HWP 양식에서 라디오 버튼은 보통 같은 문단에 배치됨)
+-    const section = sec;
+-    // 동일 문단의 모든 컨트롤을 순회하여 같은 그룹의 라디오 버튼 해제
+-    for (let i = 0; i < 50; i++) { // 최대 50개 컨트롤 검사
+-      if (i === ci) continue;
+-      const otherInfo = this.wasm.getFormObjectInfo(section, para, i);
+-      if (!otherInfo.ok || otherInfo.formType !== 'RadioButton') continue;
+-      const otherGroup = otherInfo.properties?.['GroupName'] ?? '';
+-      if (otherGroup === groupName && otherInfo.value !== 0) {
+-        this.wasm.setFormValue(section, para, i, JSON.stringify({ value: 0 }));
+-        changes.push({
+-          sec: section, para, ci: i,
+-          beforeJson: JSON.stringify({ value: otherInfo.value }),
+-          afterJson: JSON.stringify({ value: 0 }),
+-        });
++    if (groupName) {
++      const pages = this.wasm.pageCount ?? 0;
++      for (let p = 0; p < pages; p++) {
++        for (const other of this.wasm.getFormObjectsOnPage(p)) {
++          if (other.formType !== 'RadioButton' || this.sameFormObject(other, hit)) continue;
++          if (other.sec !== hit.sec || !other.value) continue;
++          const otherInfo = this.formObjectInfo(other);
++          if (!otherInfo.ok || groupOf(otherInfo) !== groupName) continue;
++          this.setFormObjectValue(other, JSON.stringify({ value: 0 }));
++          changes.push({
++            sec: other.sec!, para: other.para!, ci: other.ci!, inCell: this.formInCellLoc(other),
++            beforeJson: JSON.stringify({ value: otherInfo.value }),
++            afterJson: JSON.stringify({ value: 0 }),
++          });
++        }
+       }
+     }
+ 
+     // 클릭된 라디오 버튼 선택
+-    this.wasm.setFormValue(sec, para, ci, JSON.stringify({ value: 1 }));
++    this.setFormObjectValue(hit, JSON.stringify({ value: 1 }));
+     changes.push({
+-      sec, para, ci,
++      sec: hit.sec!, para: hit.para!, ci: hit.ci!, inCell: this.formInCellLoc(hit),
+       beforeJson: JSON.stringify({ value: info.value ?? 0 }),
+       afterJson: JSON.stringify({ value: 1 }),
+     });
+@@ -6144,10 +6335,10 @@ export class InputHandler {
+     this.removeFormOverlay();
+     if (!formHit.bbox) return;
+ 
+-    const info = this.wasm.getFormObjectInfo(sec, para, ci);
++    const info = this.formObjectInfo(formHit);
+     if (!info.ok) return;
+ 
+-    // 항목 목록: 스크립트 InsertString 추출 결과 (WASM에서 제공)
++    // 항목 목록: 스크립트 InsertString 또는 HWPX listItem (WASM에서 제공)
+     const items: string[] = info.items ?? [];
+     const currentText = formHit.text ?? '';
+ 
+@@ -6176,10 +6367,10 @@ export class InputHandler {
+       row.style.lineHeight = `${itemHeight}px`;
+       row.addEventListener('mousedown', (e) => {
+         e.preventDefault();
+-        this.wasm.setFormValue(sec, para, ci, JSON.stringify({ text: item }));
++        this.setFormObjectValue(formHit, JSON.stringify({ text: item }));
+         // [Task #2374] 콤보 선택 기록(동일 항목 재선택은 no-op 제외).
+         this.recordFormValueChanges([{
+-          sec, para, ci,
++          sec, para, ci, inCell: this.formInCellLoc(formHit),
+           beforeJson: JSON.stringify({ text: currentText }),
+           afterJson: JSON.stringify({ text: item }),
+         }]);
+diff --git a/rhwp-studio/src/main.ts b/rhwp-studio/src/main.ts
+index 91923c5c..381ad657 100644
+--- a/rhwp-studio/src/main.ts
++++ b/rhwp-studio/src/main.ts
+@@ -156,6 +156,13 @@ async function completeHostSave(fileName?: string): Promise<{ ok: true; wasDirty
+ (window as any).rhwpStudio = {
+   notifySaved: (fileName?: string) => completeHostSave(fileName),
+   fonts: { setProvider: setHostFontProvider, getState: getHostFontState },
++  // 양식 모드 키보드 이동: 호스트가 정한 키로 부른다 (같은 출처 iframe 호스트)
++  formNavigation: {
++    moveObject: (delta = 1) => inputHandler?.moveToAdjacentFormObject(delta) ?? false,
++    moveField: (delta = 1) => inputHandler?.moveToAdjacentFormField(delta) ?? false,
++    focusedObject: () => inputHandler?.getFocusedFormObject() ?? null,
++    clear: () => inputHandler?.clearFormObjectFocus(),
++  },
+ };
+ 
+ // E2E 테스트용 전역 노출 (개발 모드 전용)
+diff --git a/rhwp-studio/src/styles/form-overlay.css b/rhwp-studio/src/styles/form-overlay.css
+index 56c71506..2d3dba50 100644
+--- a/rhwp-studio/src/styles/form-overlay.css
++++ b/rhwp-studio/src/styles/form-overlay.css
+@@ -32,6 +32,23 @@
+   background: var(--accent-strong);
+ }
+ 
++/* 키보드로 고른 항목 */
++.form-combo-dropdown .form-combo-item.kb-active {
++  outline: 2px solid var(--color-primary);
++  outline-offset: -2px;
++}
++
++/* 키보드로 고른 양식 개체 (체크박스·라디오·드롭다운) */
++.form-object-focus {
++  position: absolute;
++  z-index: 19;
++  box-sizing: border-box;
++  border: 2px solid #1a73e8;
++  border-radius: 3px;
++  box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.25);
++  pointer-events: none;
++}
++
+ /* Edit 입력 오버레이 */
+ .form-edit-input {
+   position: absolute;
+diff --git a/src/document_core/queries/form_query.rs b/src/document_core/queries/form_query.rs
+index 2e6f6019..04cb4402 100644
+--- a/src/document_core/queries/form_query.rs
++++ b/src/document_core/queries/form_query.rs
+@@ -22,45 +22,29 @@ impl DocumentCore {
+         let tree = self.build_page_tree_cached(page_num)?;
+ 
+         if let Some((form, bbox)) = find_form_node_at(&tree.root, x, y) {
+-            let form_type_str = form_type_to_str(form.form_type);
+-            // 셀 내부 위치 정보 직렬화
+-            let cell_loc_json = if let Some((tpi, tci, ci_idx, cp_idx)) = form.cell_location {
+-                format!(
+-                    r#","inCell":true,"tablePara":{},"tableCi":{},"cellIdx":{},"cellPara":{}"#,
+-                    tpi, tci, ci_idx, cp_idx
+-                )
+-            } else {
+-                String::new()
+-            };
+-            // sec/para는 최상위 문단 인덱스로 반환
+-            // cell_location이 있으면 table_para_index를 para로 사용
+-            let (ret_para, ret_ci) = if let Some((tpi, _tci, _ci_idx, _cp_idx)) = form.cell_location
+-            {
+-                (tpi, form.control_index)
+-            } else {
+-                (form.para_index, form.control_index)
+-            };
+-            Ok(format!(
+-                r#"{{"found":true,"sec":{},"para":{},"ci":{},"formType":"{}","name":"{}","value":{},"caption":"{}","text":"{}","bbox":{{"x":{},"y":{},"w":{},"h":{}}}{}}}"#,
+-                form.section_index,
+-                ret_para,
+-                ret_ci,
+-                form_type_str,
+-                escape_json(&form.name),
+-                form.value,
+-                escape_json(&form.caption),
+-                escape_json(&form.text),
+-                bbox.0,
+-                bbox.1,
+-                bbox.2,
+-                bbox.3,
+-                cell_loc_json,
+-            ))
++            Ok(form_hit_json(form, bbox))
+         } else {
+             Ok(r#"{"found":false}"#.to_string())
+         }
+     }
+ 
++    /// 쪽 안의 모든 양식 개체 (키보드로 개체 사이를 옮겨 다닐 때 쓴다).
++    ///
++    /// 반환: getFormObjectAt 과 같은 모양의 객체 배열 (그려지는 순서)
++    pub fn get_form_objects_on_page_native(
++        &self,
++        page_num: u32,
++    ) -> Result<String, crate::error::HwpError> {
++        let tree = self.build_page_tree_cached(page_num)?;
++        let mut found = Vec::new();
++        collect_form_nodes(&tree.root, &mut found);
++        let items: Vec<String> = found
++            .into_iter()
++            .map(|(form, bbox)| form_hit_json(form, bbox))
++            .collect();
++        Ok(format!("[{}]", items.join(",")))
++    }
++
+     /// 양식 개체 값을 조회한다.
+     pub fn get_form_value_native(
+         &self,
+@@ -199,51 +183,86 @@ impl DocumentCore {
+             .and_then(|p| p.controls.get(ci));
+ 
+         match control {
+-            Some(Control::Form(f)) => {
+-                let form_type_str = form_type_to_str(f.form_type);
+-                // properties를 JSON 객체로 직렬화
+-                let props: Vec<String> = f
+-                    .properties
++            Some(Control::Form(f)) => Ok(self.form_info_json(f)),
++            _ => Ok(r#"{"ok":false,"error":"not a form object"}"#.to_string()),
++        }
++    }
++
++    /// 셀 내부 양식 개체 상세 정보 (get_form_object_info_native 와 같은 모양).
++    pub fn get_form_object_info_in_cell_native(
++        &self,
++        sec: usize,
++        table_para: usize,
++        table_ci: usize,
++        cell_idx: usize,
++        cell_para: usize,
++        form_ci: usize,
++    ) -> Result<String, crate::error::HwpError> {
++        let control = self
++            .document
++            .sections
++            .get(sec)
++            .and_then(|s| s.paragraphs.get(table_para))
++            .and_then(|p| p.controls.get(table_ci))
++            .and_then(|c| if let Control::Table(t) = c { Some(t.as_ref()) } else { None })
++            .and_then(|t| t.cells.get(cell_idx))
++            .and_then(|cell| cell.paragraphs.get(cell_para))
++            .and_then(|p| p.controls.get(form_ci));
++        match control {
++            Some(Control::Form(f)) => Ok(self.form_info_json(f)),
++            _ => Ok(r#"{"ok":false,"error":"cell form not found"}"#.to_string()),
++        }
++    }
++
++    fn form_info_json(&self, f: &crate::model::control::FormObject) -> String {
++        let form_type_str = form_type_to_str(f.form_type);
++        // properties를 JSON 객체로 직렬화
++        let props: Vec<String> = f
++            .properties
++            .iter()
++            .map(|(k, v)| format!(r#""{}":"{}""#, escape_json(k), escape_json(v)))
++            .collect();
++        let props_json = format!("{{{}}}", props.join(","));
++
++        // ComboBox: 스크립트에서 InsertString 항목 추출. 없으면 HWPX <hp:listItem> 값
++        let items_json = if f.form_type == FormType::ComboBox {
++            let mut items =
++                extract_combobox_items_from_script(&self.document.extra_streams, &f.name);
++            if items.is_empty() {
++                let mut i = 0;
++                while let Some(v) = f.properties.get(&format!("listItem{}", i)) {
++                    items.push(v.clone());
++                    i += 1;
++                }
++            }
++            if items.is_empty() {
++                "[]".to_string()
++            } else {
++                let arr: Vec<String> = items
+                     .iter()
+-                    .map(|(k, v)| format!(r#""{}":"{}""#, escape_json(k), escape_json(v)))
++                    .map(|s| format!(r#""{}""#, escape_json(s)))
+                     .collect();
+-                let props_json = format!("{{{}}}", props.join(","));
+-
+-                // ComboBox: 스크립트에서 InsertString 항목 추출
+-                let items_json = if f.form_type == FormType::ComboBox {
+-                    let items =
+-                        extract_combobox_items_from_script(&self.document.extra_streams, &f.name);
+-                    if items.is_empty() {
+-                        "[]".to_string()
+-                    } else {
+-                        let arr: Vec<String> = items
+-                            .iter()
+-                            .map(|s| format!(r#""{}""#, escape_json(s)))
+-                            .collect();
+-                        format!("[{}]", arr.join(","))
+-                    }
+-                } else {
+-                    "[]".to_string()
+-                };
+-
+-                Ok(format!(
+-                    r#"{{"ok":true,"formType":"{}","name":"{}","value":{},"text":"{}","caption":"{}","enabled":{},"width":{},"height":{},"foreColor":{},"backColor":{},"properties":{},"items":{}}}"#,
+-                    form_type_str,
+-                    escape_json(&f.name),
+-                    f.value,
+-                    escape_json(&f.text),
+-                    escape_json(&f.caption),
+-                    f.enabled,
+-                    f.width,
+-                    f.height,
+-                    f.fore_color,
+-                    f.back_color,
+-                    props_json,
+-                    items_json,
+-                ))
++                format!("[{}]", arr.join(","))
+             }
+-            _ => Ok(r#"{"ok":false,"error":"not a form object"}"#.to_string()),
+-        }
++        } else {
++            "[]".to_string()
++        };
++
++        format!(
++            r#"{{"ok":true,"formType":"{}","name":"{}","value":{},"text":"{}","caption":"{}","enabled":{},"width":{},"height":{},"foreColor":{},"backColor":{},"properties":{},"items":{}}}"#,
++            form_type_str,
++            escape_json(&f.name),
++            f.value,
++            escape_json(&f.text),
++            escape_json(&f.caption),
++            f.enabled,
++            f.width,
++            f.height,
++            f.fore_color,
++            f.back_color,
++            props_json,
++            items_json,
++        )
+     }
+ }
+ 
+@@ -275,6 +294,52 @@ fn apply_form_value(
+ }
+ 
+ /// 렌더 트리를 재귀 순회하여 좌표에 해당하는 FormObject 노드를 찾는다.
++fn form_hit_json(form: &FormObjectNode, bbox: (f64, f64, f64, f64)) -> String {
++    let form_type_str = form_type_to_str(form.form_type);
++    // 셀 내부 위치 정보 직렬화
++    let cell_loc_json = if let Some((tpi, tci, ci_idx, cp_idx)) = form.cell_location {
++        format!(
++            r#","inCell":true,"tablePara":{},"tableCi":{},"cellIdx":{},"cellPara":{}"#,
++            tpi, tci, ci_idx, cp_idx
++        )
++    } else {
++        String::new()
++    };
++    // sec/para는 최상위 문단 인덱스로 반환
++    // cell_location이 있으면 table_para_index를 para로 사용
++    let (ret_para, ret_ci) = if let Some((tpi, _tci, _ci_idx, _cp_idx)) = form.cell_location {
++        (tpi, form.control_index)
++    } else {
++        (form.para_index, form.control_index)
++    };
++    format!(
++        r#"{{"found":true,"sec":{},"para":{},"ci":{},"formType":"{}","name":"{}","value":{},"caption":"{}","text":"{}","bbox":{{"x":{},"y":{},"w":{},"h":{}}}{}}}"#,
++        form.section_index,
++        ret_para,
++        ret_ci,
++        form_type_str,
++        escape_json(&form.name),
++        form.value,
++        escape_json(&form.caption),
++        escape_json(&form.text),
++        bbox.0,
++        bbox.1,
++        bbox.2,
++        bbox.3,
++        cell_loc_json,
++    )
++}
++
++fn collect_form_nodes<'a>(node: &'a RenderNode, out: &mut Vec<(&'a FormObjectNode, (f64, f64, f64, f64))>) {
++    if let RenderNodeType::FormObject(ref form) = node.node_type {
++        let b = &node.bbox;
++        out.push((form, (b.x, b.y, b.width, b.height)));
++    }
++    for child in &node.children {
++        collect_form_nodes(child, out);
++    }
++}
++
+ fn find_form_node_at(
+     node: &RenderNode,
+     x: f64,
+diff --git a/src/wasm_api.rs b/src/wasm_api.rs
+index 2031085e..262626ae 100644
+--- a/src/wasm_api.rs
++++ b/src/wasm_api.rs
+@@ -5390,6 +5390,14 @@ impl HwpDocument {
+             .map_err(|e| e.into())
+     }
+ 
++    /// 쪽 안의 모든 양식 개체. 반환: getFormObjectAt 결과 모양의 배열
++    #[wasm_bindgen(js_name = getFormObjectsOnPage)]
++    pub fn get_form_objects_on_page(&self, page_num: u32) -> Result<String, JsValue> {
++        self.core
++            .get_form_objects_on_page_native(page_num)
++            .map_err(|e| e.into())
++    }
++
+     /// 양식 개체 값을 조회한다.
+     ///
+     /// 반환: `{ok, formType, name, value, text, caption, enabled}`
+@@ -5481,6 +5489,29 @@ impl HwpDocument {
+             .map_err(|e| e.into())
+     }
+ 
++    /// 셀 내부 양식 개체 상세 정보 (getFormObjectInfo 와 같은 모양)
++    #[wasm_bindgen(js_name = getFormObjectInfoInCell)]
++    pub fn get_form_object_info_in_cell(
++        &self,
++        sec: u32,
++        table_para: u32,
++        table_ci: u32,
++        cell_idx: u32,
++        cell_para: u32,
++        form_ci: u32,
++    ) -> Result<String, JsValue> {
++        self.core
++            .get_form_object_info_in_cell_native(
++                sec as usize,
++                table_para as usize,
++                table_ci as usize,
++                cell_idx as usize,
++                cell_para as usize,
++                form_ci as usize,
++            )
++            .map_err(|e| e.into())
++    }
++
+     // ── 검색/치환 API ──
+ 
+     /// 문서 텍스트 검색
