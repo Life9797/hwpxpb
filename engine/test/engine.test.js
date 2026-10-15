@@ -89,3 +89,14 @@ test('값 이외의 XML 은 바뀌지 않는다', () => {
 test('HWPX 가 아니면 오류', () => {
   assert.throws(() => new HwpxDocument(new Uint8Array([1, 2, 3])));
 });
+
+test('빈 칸의 안내문(빨간 글씨 등)은 지우고 값은 누름틀 글자 모양으로 넣는다', () => {
+  const doc = open();
+  doc.fill({ PT_NM: '홍길동', RESULT: '이상' });
+  const xml = strFromU8(unzipSync(doc.toBytes())['Contents/section0.xml']);
+  // 안내문 run(charPr 37)은 비고, 값은 fieldBegin 이 있는 run(charPr 32)에 들어간다
+  assert.match(xml, /name="PT_NM"[^>]*>[\s\S]*?<\/hp:fieldBegin><\/hp:ctrl><hp:t>홍길동<\/hp:t><\/hp:run><hp:run charPrIDRef="37"><hp:t\/><\/hp:run>/);
+  assert.ok(!xml.includes(' 성명</hp:t>'));
+  // 이미 입력돼 있던 칸은 그 자리(글자 모양)에 바꿔 넣는다
+  assert.match(xml, /<hp:t>이상<\/hp:t><hp:ctrl><hp:fieldEnd beginIDRef="102"/);
+});

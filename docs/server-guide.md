@@ -24,6 +24,7 @@ PDF 출력에는 rhwp 명령행 도구(`cargo build --release --bin rhwp`, rhwp 
 | `API_KEY` | (없음) | 설정하면 모든 `/api` 요청에 `X-API-Key` 헤더 필요 |
 | `RHWP_BIN` | `rhwp` | PDF 변환기 경로 |
 | `FONT_PATHS` | | PDF 글꼴 폴더 (`:` 로 여러 개) |
+| `PDF_FALLBACK_SANS` / `_SERIF` / `_MONO` | Noto CJK KR | 문서 글꼴이 서버에 없을 때 쓸 글꼴 이름 (예: `NanumGothic`). 한글 글꼴이 하나도 없으면 PDF 에 글자가 빈칸으로 나옵니다 |
 
 ## 2. HTTP API
 

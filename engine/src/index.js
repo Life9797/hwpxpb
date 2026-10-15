@@ -201,15 +201,19 @@ export class HwpxDocument {
         const newText = escapeXml(text).replace(/\r?\n/g, '<hp:lineBreak/>');
         const frag = xml.slice(f.start, f.end);
         let newFrag;
-        if (/<hp:t[\s>/]/.test(frag)) {
-          // 첫 <hp:t> 에 새 값, 나머지는 비움 → run 구조와 글자 모양 유지
+        if (f.dirty && /<hp:t[\s>/]/.test(frag)) {
+          // 이미 입력된 값: 첫 <hp:t> 에 새 값, 나머지는 비움 → 입력값의 글자 모양 유지
           let first = true;
           newFrag = frag.replace(TEXT_RE, () => {
             if (!first) return '<hp:t/>';
             first = false;
             return `<hp:t>${newText}</hp:t>`;
           });
-        } else newFrag = `<hp:t>${newText}</hp:t>` + frag;
+        } else {
+          // 빈 칸(안내문만 있음): 안내문은 비우고 값은 누름틀 시작 run 에 넣는다.
+          // 안내문은 보통 빨간 글씨 등 별도 글자 모양이라, 한글에서 직접 입력할 때처럼 누름틀 글자 모양을 쓴다.
+          newFrag = (text ? `<hp:t>${newText}</hp:t>` : '') + frag.replace(TEXT_RE, '<hp:t/>');
+        }
         edits.push([f.start, f.end, newFrag]);
         edits.push([f.tagStart, f.tagStart + f.tag.length, setAttr(f.tag, 'dirty', text ? '1' : '0')]);
         applied.add(f.name);

@@ -4,7 +4,18 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export async function hwpxToPdf(hwpx, { rhwpBin = process.env.RHWP_BIN || 'rhwp', fontPaths = [], timeoutMs = 120_000 } = {}) {
+export async function hwpxToPdf(
+  hwpx,
+  {
+    rhwpBin = process.env.RHWP_BIN || 'rhwp',
+    fontPaths = [],
+    // 문서 글꼴이 없을 때 쓸 글꼴. 기본은 rhwp 기본값(Noto CJK KR)
+    fallbackSerif = process.env.PDF_FALLBACK_SERIF,
+    fallbackSans = process.env.PDF_FALLBACK_SANS,
+    fallbackMono = process.env.PDF_FALLBACK_MONO,
+    timeoutMs = 120_000,
+  } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'hwpxpb-'));
   try {
     const input = join(dir, 'doc.hwpx');
@@ -12,6 +23,9 @@ export async function hwpxToPdf(hwpx, { rhwpBin = process.env.RHWP_BIN || 'rhwp'
     await writeFile(input, hwpx);
     const args = ['export-pdf', input, '-o', output];
     for (const p of fontPaths) args.push('--font-path', p);
+    if (fallbackSerif) args.push('--fallback-serif', fallbackSerif);
+    if (fallbackSans) args.push('--fallback-sans', fallbackSans);
+    if (fallbackMono) args.push('--fallback-mono', fallbackMono);
     await run(rhwpBin, args, timeoutMs);
     return await readFile(output);
   } finally {
