@@ -1,0 +1,290 @@
+// PB(OCX) ↔ 웹 에디터 다리. 서버 없이 PC 안에서만 동작한다.
+//
+// OCX 가 WebView2 의 ExecuteScriptAsync 로 window.hwpBridge.* 를 부르고,
+// 이 페이지는 window.chrome.webview.postMessage 로 OCX 에 이벤트를 보낸다.
+// 모든 함수는 JSON 으로 직렬화 가능한 값을 돌려준다(오류는 {ok:false, error}).
+//
+// 양식 모드(form)에서는 문서를 저장·추출할 때 "원본 양식 + 추출한 값" 으로 다시 만든다.
+// 그래서 에디터가 문서를 다시 쓰더라도 결과 파일의 서식은 원본 양식 그대로다.
+import { createStudio } from './vendor/rhwp-editor/index.js';
+import { HwpxDocument } from './vendor/engine/index.js';
+
+const STUDIO_URL = new URL('./studio/', location.href).href;
+
+const state = {
+  studio: null,
+  template: null, // 원본 양식 바이트 (Uint8Array)
+  fileName: 'document.hwpx',
+  mode: 'form', // form | edit | view
+};
+
+// ---- 양식 모드의 이동 키 -------------------------------------------------------
+// nextObject/prevObject: 선택 개체(체크박스·라디오·드롭다운) 사이 이동. 고른 개체는 Space/Enter 로 체크·선택
+// nextField/prevField:   누름틀 사이 이동
+// 키 이름 예: "Ctrl+Tab", "Ctrl+Shift+Tab", "F8", "Alt+N". 빈 문자열이면 그 기능을 끈다.
+export const DEFAULT_KEYS = Object.freeze({
+  nextObject: 'Ctrl+Tab',
+  prevObject: 'Ctrl+Shift+Tab',
+  nextField: 'Tab',
+  prevField: 'Shift+Tab',
+});
+const keys = { ...DEFAULT_KEYS };
+
+const MOD_ORDER = ['ctrl', 'alt', 'shift', 'meta'];
+const MOD_ALIAS = { control: 'ctrl', ctl: 'ctrl', option: 'alt', cmd: 'meta', command: 'meta', win: 'meta' };
+
+/** "ctrl + tab" → "ctrl+tab" (비교용) */
+function normalizeKey(text) {
+  const parts = String(text ?? '')
+    .split('+')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+    .map((p) => MOD_ALIAS[p] ?? p);
+  if (parts.length === 0) return '';
+  const key = parts.pop();
+  const mods = MOD_ORDER.filter((m) => parts.includes(m));
+  return [...mods, key === 'spacebar' ? 'space' : key].join('+');
+}
+
+/** 키 이벤트 → "ctrl+shift+tab" */
+export function eventKey(e) {
+  let key = e.key === ' ' ? 'space' : String(e.key).toLowerCase();
+  if (['control', 'shift', 'alt', 'meta', 'process', 'dead', 'unidentified'].includes(key)) return '';
+  // 한글 입력 중이거나 Shift 로 글자가 바뀌어도 같은 키로 보이게 물리 키 이름을 쓴다
+  if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3).toLowerCase();
+  else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5);
+  return [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta', key].filter(Boolean).join('+');
+}
+
+function onEditorKey(e) {
+  if (state.mode !== 'form') return;
+  // 바깥 화면의 입력 칸(키 설정 창 등)에서 누른 키는 건드리지 않는다
+  if (e.target?.ownerDocument === document && e.target.closest?.('input, select, textarea, dialog')) return;
+  const pressed = eventKey(e);
+  if (!pressed) return;
+  const action = Object.keys(keys).find((k) => keys[k] && normalizeKey(keys[k]) === pressed);
+  if (!action) return;
+  const nav = formNav();
+  if (!nav) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (action === 'nextObject') nav.moveObject(1);
+  else if (action === 'prevObject') nav.moveObject(-1);
+  else if (action === 'nextField') nav.moveField(1);
+  else if (action === 'prevField') nav.moveField(-1);
+}
+
+/** 에디터(rhwp-studio)의 양식 이동 기능 (patches/rhwp/0002) */
+const formNav = () => studioWindow()?.rhwpStudio?.formNavigation ?? null;
+
+function studioWindow() {
+  try {
+    return document.querySelector('#editor iframe')?.contentWindow ?? null;
+  } catch {
+    return null; // 다른 출처
+  }
+}
+
+function hookEditorKeys() {
+  window.addEventListener('keydown', onEditorKeyOnce, true);
+  const frame = document.querySelector('#editor iframe');
+  const attach = () => {
+    const w = studioWindow();
+    if (w && !w.__hwpxpbKeys) {
+      w.__hwpxpbKeys = true;
+      w.addEventListener('keydown', onEditorKeyOnce, true);
+    }
+  };
+  attach();
+  frame?.addEventListener('load', attach);
+}
+// 같은 이벤트가 바깥·안쪽 창에서 두 번 처리되지 않게
+const seen = new WeakSet();
+function onEditorKeyOnce(e) {
+  if (seen.has(e)) return;
+  seen.add(e);
+  onEditorKey(e);
+}
+
+const toB64 = (u8) => {
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const fromB64 = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+function emit(event, data = {}) {
+  window.chrome?.webview?.postMessage(JSON.stringify({ event, ...data }));
+}
+
+async function setFormMode(on) {
+  const ctx = await state.studio.commands.context();
+  if (Boolean(ctx.isFormMode) !== on) await state.studio.commands.execute('view:form-mode');
+}
+
+async function currentBytes() {
+  return state.studio.exportHwpx();
+}
+
+/** 에디터 화면에 보이는 값 (DB 컬럼 기준) */
+async function readValues(comboSep) {
+  return new HwpxDocument(await currentBytes()).extract({ comboSep });
+}
+
+/** 결과 문서: 양식 모드면 원본 양식에 값만 다시 넣고, 편집 모드면 에디터가 쓴 그대로 */
+async function buildDocument(comboSep) {
+  if (state.mode !== 'form' || !state.template) return currentBytes();
+  const { values } = await readValues(comboSep);
+  const doc = new HwpxDocument(state.template);
+  doc.fill(values, { comboSep });
+  return doc.toBytes();
+}
+
+async function load(bytes, keepMode = true) {
+  await state.studio.loadFile(bytes, state.fileName, { suppressDialogs: true, skipUnsavedGuard: true });
+  if (keepMode) await setFormMode(state.mode === 'form');
+}
+
+/** 출력용 쪽 SVG 목록. 에디터에 출력용 문서를 잠시 열어 그리고, 보던 문서로 되돌린다 */
+async function renderPrintPages(comboSep) {
+  const shown = await buildDocument(comboSep);
+  const printDoc = new HwpxDocument(shown).hideGuides().toBytes();
+  const editor = document.getElementById('editor');
+  editor.style.visibility = 'hidden';
+  try {
+    await load(printDoc, false);
+    const pages = [];
+    const n = await state.studio.pageCount();
+    for (let p = 0; p < n; p++) pages.push(await state.studio.getPageSvg(p));
+    return pages;
+  } finally {
+    await load(shown);
+    editor.style.visibility = '';
+  }
+}
+
+const api = {
+  /** 문서 열기. b64 = HWPX 파일 내용, mode = form | edit | view */
+  async open(b64, fileName = 'document.hwpx', mode = 'form') {
+    state.template = fromB64(b64);
+    state.fileName = fileName;
+    state.mode = mode;
+    new HwpxDocument(state.template); // HWPX 인지 먼저 확인
+    await load(state.template);
+    const doc = new HwpxDocument(state.template);
+    emit('loaded', { fileName, table: doc.dbTable });
+    return { ok: true, table: doc.dbTable };
+  },
+
+  async setMode(mode) {
+    state.mode = mode;
+    await setFormMode(mode === 'form');
+    await state.studio.chrome.set({ menu: mode === 'edit', toolbar: mode === 'edit' });
+    return { ok: true };
+  },
+
+  /** 개체 목록과 테이블명 */
+  async getSchema() {
+    const doc = new HwpxDocument(state.template ?? (await currentBytes()));
+    return { ok: true, table: doc.dbTable, schema: doc.schema() };
+  },
+
+  /** 값 대입. values = {컬럼: 값}. 결과 {applied, unknown, rejected} */
+  async setFields(values, comboSep = ':') {
+    if (typeof values === 'string') values = JSON.parse(values || '{}');
+    const base = state.mode === 'form' && state.template ? state.template : await currentBytes();
+    const doc = new HwpxDocument(base);
+    if (state.mode === 'form' && state.template) {
+      // 화면에서 이미 입력한 값은 살리고, 새 값만 덮어쓴다
+      const shown = await readValues(comboSep);
+      doc.fill(shown.values, { comboSep });
+    }
+    const result = doc.fill(values, { comboSep });
+    await load(doc.toBytes());
+    return { ok: true, ...result };
+  },
+
+  /** 값 추출. {table, values:{컬럼: 값}} */
+  async getFields(comboSep = ':') {
+    return { ok: true, ...(await readValues(comboSep)) };
+  },
+
+  /** 결과 문서(HWPX)를 base64 로 */
+  async getDocument(comboSep = ':') {
+    return { ok: true, hwpx: toB64(await buildDocument(comboSep)) };
+  },
+
+  /**
+   * 인쇄·PDF 준비: 출력용 문서(빈 칸 안내문 제외)의 모든 쪽을 SVG 로 #print-area 에 깐다.
+   * 이후 OCX 는 WebView2 인쇄/PrintToPdf 를, 브라우저는 window.print() 를 부른다.
+   */
+  async preparePrint(comboSep = ':') {
+    const pages = await renderPrintPages(comboSep);
+    const area = document.getElementById('print-area');
+    area.replaceChildren(
+      ...pages.map((svg) => {
+        const div = document.createElement('div');
+        div.className = 'print-page';
+        div.innerHTML = svg;
+        return div;
+      }),
+    );
+    return { ok: true, pages: pages.length };
+  },
+
+  /**
+   * 양식 모드의 이동 키를 바꾼다. 예: {nextObject:"F8", prevObject:"Shift+F8"}
+   * 빠진 항목은 그대로, 빈 문자열은 끔, null 이면 기본값. 결과: 지금 키 설정
+   */
+  async setKeys(map) {
+    if (typeof map === 'string') map = JSON.parse(map || '{}');
+    for (const [k, v] of Object.entries(map ?? {})) {
+      if (!(k in DEFAULT_KEYS)) throw new Error(`알 수 없는 키 항목: ${k} (${Object.keys(DEFAULT_KEYS).join(', ')})`);
+      if (v != null && v !== '' && !normalizeKey(v)) throw new Error(`키 이름이 잘못됐습니다: ${v}`);
+      keys[k] = v == null ? DEFAULT_KEYS[k] : String(v);
+    }
+    return { ok: true, keys: { ...keys } };
+  },
+
+  async getKeys() {
+    return { ok: true, keys: { ...keys }, defaults: { ...DEFAULT_KEYS } };
+  },
+
+  /** 다음(+1)/이전(-1) 선택 개체로 이동 (키 대신 버튼 등에서 부를 때) */
+  async moveObject(delta = 1) {
+    const nav = formNav();
+    if (!nav) throw new Error('에디터가 키보드 이동을 지원하지 않습니다 (rhwp 패치 0002 필요)');
+    return { ok: Boolean(nav.moveObject(Number(delta) < 0 ? -1 : 1)) };
+  },
+
+  /** 인쇄 대화상자(미리보기)를 연다. 브라우저·WebView2 공통 */
+  async print(comboSep = ':') {
+    const r = await api.preparePrint(comboSep);
+    setTimeout(() => window.print(), 0); // 대화상자가 떠 있는 동안 호출이 끝나지 않도록 다음 틱에
+    return r;
+  },
+};
+
+// OCX 는 문자열만 주고받으므로 결과를 JSON 문자열로 감싼다
+window.hwpBridge = new Proxy(api, {
+  get(target, name) {
+    const fn = target[name];
+    if (typeof fn !== 'function') return undefined;
+    return async (...args) => {
+      try {
+        return JSON.stringify(await fn(...args));
+      } catch (e) {
+        return JSON.stringify({ ok: false, error: String(e?.message ?? e) });
+      }
+    };
+  },
+});
+
+state.studio = await createStudio('#editor', {
+  studioUrl: STUDIO_URL,
+  plugins: ['hwpctrl'],
+  chrome: { menu: false, toolbar: false, statusbar: false },
+});
+hookEditorKeys();
+window.hwpBridgeReady = true;
+emit('ready');
