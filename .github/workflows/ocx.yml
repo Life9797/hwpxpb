@@ -1,6 +1,6 @@
 name: ocx
 # PB 12.1 용 OCX 를 Windows 에서 빌드하고, 바로 쓸 수 있는 zip 을 만든다.
-# ocx-v* 태그를 올리면 그 zip 을 GitHub Release 에 첨부한다.
+# ocx-v* 태그를 올리거나, 수동 실행 때 release 에 태그 이름을 주면 그 zip 을 GitHub Release 에 첨부한다.
 on:
   pull_request:
     paths: ["pb/**", ".github/workflows/ocx.yml"]
@@ -8,6 +8,10 @@ on:
     branches: [main]
     tags: ["ocx-v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Release 태그 이름 (예: ocx-v0.1.0). 비우면 zip 만 만든다"
+        required: false
 permissions:
   contents: write
 jobs:
@@ -36,7 +40,8 @@ jobs:
           name: HwpxEditorOcx
           path: out/HwpxEditorOcx.zip
       - name: Release 에 첨부
-        if: startsWith(github.ref, 'refs/tags/ocx-v')
+        if: startsWith(github.ref, 'refs/tags/ocx-v') || inputs.release != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --prerelease --title "OCX ${{ github.ref_name }}" --notes-file pb/ocx/README-설치.txt
+          TAG: ${{ inputs.release || github.ref_name }}
+        run: gh release create "$env:TAG" out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "OCX $env:TAG" --notes-file pb/ocx/README-설치.txt
