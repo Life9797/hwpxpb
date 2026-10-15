@@ -100,3 +100,10 @@ test('빈 칸의 안내문(빨간 글씨 등)은 지우고 값은 누름틀 글�
   // 이미 입력돼 있던 칸은 그 자리(글자 모양)에 바꿔 넣는다
   assert.match(xml, /<hp:t>이상<\/hp:t><hp:ctrl><hp:fieldEnd beginIDRef="102"/);
 });
+
+test('빈 칸에 빈 값을 넣으면 아무것도 바뀌지 않는다 (추출값을 다시 넣어도 원본과 같다)', () => {
+  const src = makeHwpx();
+  const doc = new HwpxDocument(src);
+  doc.fill(doc.extract().values);
+  assert.equal(strFromU8(unzipSync(doc.toBytes())['Contents/section0.xml']), strFromU8(unzipSync(src)['Contents/section0.xml']));
+});

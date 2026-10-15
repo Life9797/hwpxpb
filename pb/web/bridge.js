@@ -142,4 +142,5 @@ state.studio = await createStudio('#editor', {
   plugins: ['hwpctrl'],
   chrome: { menu: false, toolbar: false, statusbar: false },
 });
+window.hwpBridgeReady = true;
 emit('ready');

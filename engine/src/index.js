@@ -198,6 +198,10 @@ export class HwpxDocument {
       for (const f of iterFields(xml)) {
         if (!(f.name in values)) continue;
         const text = values[f.name] == null ? '' : String(values[f.name]);
+        if (!text && !f.dirty) {
+          applied.add(f.name); // 이미 빈 칸: 안내문을 그대로 둔다
+          continue;
+        }
         const newText = escapeXml(text).replace(/\r?\n/g, '<hp:lineBreak/>');
         const frag = xml.slice(f.start, f.end);
         let newFrag;
