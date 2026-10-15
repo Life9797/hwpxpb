@@ -18,6 +18,8 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 2. OCX 빌드 (Windows, Visual Studio 2022 또는 .NET SDK): `dotnet build pb/ocx -c Release`
    → `pb/ocx/bin/Release/net48/` 에 `HwpxEditorOcx.dll`, `Microsoft.Web.WebView2.*.dll`, `web\` 가 생깁니다.
 3. 각 PC에 위 폴더를 복사하고 **관리자 권한**으로 `register.bat` 실행 (32비트 regasm 사용)
+   - **.NET Framework 4.8** 이 필요합니다. 없으면 `register.bat` 이 알려 줍니다. regasm 이 `AsyncStateMachineAttribute 형식을 로드할 수 없습니다` 로 실패하는 것도 4.8 이 없어서입니다 ([4.8 Runtime 설치](https://dotnet.microsoft.com/download/dotnet-framework/net48) 후 재부팅).
+   - 경고 `RA0000` (/codebase, 서명되지 않은 어셈블리) 은 무시해도 됩니다.
 4. WebView2 런타임: Windows 10/11 은 대부분 기본 설치. 없으면 Microsoft "Evergreen Bootstrapper" 로 설치.
 
 ## 3. PB 화면에 넣기

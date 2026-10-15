@@ -1,4 +1,25 @@
 @echo off
-rem ê´€ë¦¬ìž ê¶Œí•œìœ¼ë¡œ ì‹¤í–‰. PB 12.1 ì€ 32ë¹„íŠ¸ì´ë¯€ë¡œ 32ë¹„íŠ¸ regasm ì„ ì“´ë‹¤.
+rem °ü¸®ÀÚ ±ÇÇÑÀ¸·Î ½ÇÇà. PB 12.1 Àº 32ºñÆ®ÀÌ¹Ç·Î 32ºñÆ® regasm À» ¾´´Ù.
+rem ÀÌ OCX ´Â .NET Framework 4.8 ÀÌ ÇÊ¿äÇÏ´Ù (Release °ª 528040 ÀÌ»ó).
+set REL=0
+for /f "tokens=3" %%a in ('reg query "HKLM\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" /v Release 2^>nul') do set /a REL=%%a
+if %REL% LSS 528040 (
+  echo.
+  echo [¿À·ù] .NET Framework 4.8 ÀÌ ¼³Ä¡µÇ¾î ÀÖÁö ¾Ê½À´Ï´Ù. ^(ÇöÀç Release °ª: %REL%^)
+  echo        Microsoft ".NET Framework 4.8 Runtime" À» ¼³Ä¡ÇÏ°í PC ¸¦ ´Ù½Ã ½ÃÀÛÇÑ µÚ
+  echo        ÀÌ ÆÄÀÏÀ» ´Ù½Ã °ü¸®ÀÚ ±ÇÇÑÀ¸·Î ½ÇÇàÇÏ¼¼¿ä.
+  echo        https://dotnet.microsoft.com/download/dotnet-framework/net48
+  echo.
+  pause
+  exit /b 1
+)
 set REGASM=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\regasm.exe
 "%REGASM%" /codebase /tlb "%~dp0HwpxEditorOcx.dll"
+if errorlevel 1 (
+  echo.
+  echo [¿À·ù] µî·Ï¿¡ ½ÇÆÐÇß½À´Ï´Ù. °ü¸®ÀÚ ±ÇÇÑÀ¸·Î ½ÇÇàÇß´ÂÁö È®ÀÎÇÏ¼¼¿ä.
+) else (
+  echo.
+  echo µî·ÏÇß½À´Ï´Ù. /codebase °æ°í RA0000 Àº ¹«½ÃÇØµµ µË´Ï´Ù.
+)
+pause
