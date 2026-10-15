@@ -26,7 +26,7 @@ cp "$RHWP/pkg/rhwp_bg.wasm" "$RHWP/pkg/rhwp.js" "$RHWP/rhwp-studio/public/"
 # 2) 결과 폴더 구성
 rm -rf "$OUT"
 mkdir -p "$OUT/vendor/engine" "$OUT/vendor/fflate" "$OUT/vendor/rhwp-editor"
-cp "$ROOT/pb/web/index.html" "$ROOT/pb/web/bridge.js" "$OUT/"
+cp "$ROOT/pb/web/index.html" "$ROOT/pb/web/bridge.js" "$ROOT/pb/web/standalone.js" "$OUT/"
 cp "$ROOT/engine/src/index.js" "$OUT/vendor/engine/"
 ( cd "$ROOT" && npm install --no-audit --no-fund >/dev/null )
 cp "$ROOT/node_modules/fflate/esm/browser.js" "$OUT/vendor/fflate/"

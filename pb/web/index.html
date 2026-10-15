@@ -2,24 +2,53 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>hwpxpb</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>hwpxpb 에디터</title>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
-    #editor { width: 100%; height: 100%; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; font: 14px/1.4 system-ui, 'Malgun Gothic', sans-serif; }
+    body { display: flex; flex-direction: column; }
+    #toolbar { display: none; flex: none; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid #d0d4da; background: #f5f6f8; }
+    body.standalone #toolbar { display: flex; }
+    #toolbar button, #toolbar select { font: inherit; padding: 4px 10px; border: 1px solid #b8bec7; border-radius: 4px; background: #fff; cursor: pointer; }
+    #toolbar button:disabled { opacity: .5; cursor: default; }
+    #toolbar .sep { width: 1px; align-self: stretch; background: #d0d4da; margin: 0 4px; }
+    #toolbar #doc-name { color: #555; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+    #toolbar #message { margin-left: auto; color: #b42318; }
+    #editor { flex: 1; min-height: 0; width: 100%; }
     #print-area { display: none; }
     @media print {
       @page { margin: 0; }
-      #editor { display: none; }
+      html, body { height: auto; overflow: visible; display: block; }
+      #toolbar, #editor { display: none !important; }
       #print-area { display: block; }
-      #print-area > div { page-break-after: always; }
-      #print-area svg { width: 100%; height: auto; display: block; }
+      /* 한 쪽 = 용지 한 장. 소수점 오차로 빈 쪽이 생기지 않게 높이를 용지에 맞춘다 */
+      #print-area > .print-page { height: 100vh; overflow: hidden; break-after: page; }
+      #print-area > .print-page:last-child { break-after: auto; }
+      #print-area svg { width: 100%; height: 100%; display: block; }
     }
   </style>
 </head>
 <body>
+  <!-- 일반 브라우저에서 열었을 때만 보인다 (PB 안에서는 PB 화면이 버튼 역할) -->
+  <div id="toolbar">
+    <button id="btn-open" disabled>열기</button>
+    <input id="file-input" type="file" accept=".hwpx" hidden />
+    <select id="sel-mode" disabled title="화면 모드">
+      <option value="form">양식 입력</option>
+      <option value="edit">자유 편집</option>
+    </select>
+    <span class="sep"></span>
+    <button id="btn-save" disabled title="연 파일에 그대로 저장 (Ctrl+S)">저장</button>
+    <button id="btn-save-as" disabled>다른 이름으로 저장</button>
+    <button id="btn-values" disabled title="입력값을 DB 컬럼 기준 JSON 으로 저장">값 저장(JSON)</button>
+    <button id="btn-print" disabled title="인쇄 대화상자에서 프린터 또는 PDF 로 저장을 고릅니다">인쇄 / PDF</button>
+    <span id="doc-name"></span>
+    <span id="message"></span>
+  </div>
   <div id="editor"></div>
   <div id="print-area"></div>
   <script type="importmap">{ "imports": { "fflate": "./vendor/fflate/browser.js" } }</script>
   <script type="module" src="./bridge.js"></script>
+  <script type="module" src="./standalone.js"></script>
 </body>
 </html>

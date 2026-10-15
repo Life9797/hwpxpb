@@ -107,3 +107,16 @@ test('빈 칸에 빈 값을 넣으면 아무것도 바뀌지 않는다 (추출�
   doc.fill(doc.extract().values);
   assert.equal(strFromU8(unzipSync(doc.toBytes())['Contents/section0.xml']), strFromU8(unzipSync(src)['Contents/section0.xml']));
 });
+
+test('hideGuides: 빈 칸의 안내문만 지우고 입력된 값은 둔다 (출력용)', () => {
+  const doc = open();
+  doc.fill({ MEMO: '메모' });
+  doc.hideGuides();
+  const xml = strFromU8(unzipSync(doc.toBytes())['Contents/section0.xml']);
+  assert.ok(!xml.includes(' 성명</hp:t>'));
+  assert.ok(xml.includes('Direction:wstring:2:   HelpState:')); // 길이 표기는 그대로, 글자만 공백
+  const v = new HwpxDocument(doc.toBytes()).extract().values;
+  assert.equal(v.RESULT, '정상');
+  assert.equal(v.MEMO, '메모');
+  assert.equal(v.PT_NM, '');
+});

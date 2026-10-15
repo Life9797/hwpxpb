@@ -37,6 +37,10 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 | `GetSchema()` | 개체 목록 JSON |
 | `SaveAs(path, comboSep)` | HWPX 로 저장. form 모드에서는 원본 양식에 값만 다시 넣어 저장하므로 서식이 바뀌지 않음 |
 | `SavePdf(path)` | PDF 로 저장 |
+| `Print()` | 인쇄 대화상자(미리보기)를 띄움. 프린터·매수·쪽 범위는 사용자가 고름 |
+| `PrintTo(printerName, copies)` | 대화상자 없이 바로 인쇄. `printerName` 이 `""` 이면 기본 프린터 |
+| `GetPrinters()` | 설치된 프린터 이름 (줄마다 하나) |
+| `GetDefaultPrinter()` | 기본 프린터 이름 |
 | `SetMode(mode)` | 모드 바꾸기 |
 | `LastError` | 마지막 오류 메시지 |
 | `IsReady` | 에디터 준비 여부 (`ready` 이벤트 이후 true) |
@@ -89,7 +93,16 @@ ls_name = string(ole_hwp.object.GetFieldValue("PT_NM", ""))
 // 파일 저장
 ole_hwp.object.SaveAs("C:\out\처방전_홍길동.hwpx", "")
 ole_hwp.object.SavePdf("C:\out\처방전_홍길동.pdf")
+
+// 출력: 대화상자를 띄우거나, 바로 기본 프린터로 2부
+ole_hwp.object.Print()
+If Not ole_hwp.object.PrintTo("", 2) Then MessageBox("인쇄 실패", string(ole_hwp.object.LastError))
+// 특정 프린터로
+ole_hwp.object.PrintTo("\\print01\진료실", 1)
 ```
+
+출력(`Print`, `PrintTo`, `SavePdf`)에는 값이 비어 있는 누름틀의 안내문(빨간 글씨)이 찍히지 않습니다.
+한글에서 인쇄할 때와 같습니다. 화면에는 계속 보입니다. 가로 용지 양식은 `PdfLandscape = true` 로 둡니다.
 
 드롭다운 구분자가 `|` 인 양식이면 마지막 인자로 `"|"` 를 넘깁니다.
 ```powerscript

@@ -9,6 +9,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { HwpxDocument } from 'hwpx-form-engine';
 import { hwpxToPdf } from './pdf.js';
 
+// PDF 에는 빈 칸 안내문을 찍지 않는다
+const printable = (bytes) => Buffer.from(new HwpxDocument(bytes).hideGuides().toBytes());
 const pdfOpts = () => ({
   rhwpBin: process.env.RHWP_BIN || 'rhwp',
   fontPaths: (process.env.FONT_PATHS || '').split(':').filter(Boolean),
@@ -62,11 +64,11 @@ async function main() {
     if (opt.strict && (result.unknown.length || result.rejected.length)) return 2;
     const hwpx = doc.toBytes();
     await writeFile(opt.output, hwpx);
-    if (opt.pdf) await writeFile(opt.pdf, await hwpxToPdf(hwpx, pdfOpts()));
+    if (opt.pdf) await writeFile(opt.pdf, await hwpxToPdf(printable(hwpx), pdfOpts()));
     return 0;
   }
   if (cmd === 'pdf' && pos[0] && opt.output) {
-    await writeFile(opt.output, await hwpxToPdf(await readFile(pos[0]), pdfOpts()));
+    await writeFile(opt.output, await hwpxToPdf(printable(await readFile(pos[0])), pdfOpts()));
     return 0;
   }
   console.error(usage);

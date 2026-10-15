@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, chmod, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../src/app.js';
@@ -14,7 +14,12 @@ before(async () => {
   const fake = join(dir, 'fake-rhwp');
   await writeFile(fake, '#!/bin/sh\nwhile [ "$1" != "-o" ]; do shift; done\nprintf "%%PDF-1.7 fake" > "$2"\n');
   await chmod(fake, 0o755);
-  server = createApp({ templateDir: join(dir, 'templates'), apiKey: 'k', pdf: { rhwpBin: process.env.RHWP_BIN || fake } });
+  const web = join(dir, 'web');
+  await mkdir(join(web, 'studio'), { recursive: true });
+  await writeFile(join(web, 'index.html'), '<!doctype html><title>editor</title>');
+  await writeFile(join(web, 'studio', 'a.js'), 'export {}');
+  await writeFile(join(dir, 'secret.txt'), 'no');
+  server = createApp({ templateDir: join(dir, 'templates'), webDir: web, apiKey: 'k', pdf: { rhwpBin: process.env.RHWP_BIN || fake } });
   await new Promise((r) => server.listen(0, r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -95,4 +100,16 @@ test('명령행 도구: fill → extract', async () => {
   const ex = JSON.parse(execFileSync('node', [cli, 'extract', out]));
   assert.equal(ex.values.PT_NM, '김철수');
   assert.equal(ex.values.ITEM_CD, '01,02');
+});
+
+test('서버 주소로 접속하면 웹 에디터가 열린다 (화면 파일은 키 없이)', async () => {
+  let r = await fetch(base + '/?template=rx01');
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /text\/html/);
+  r = await fetch(base + '/studio/a.js');
+  assert.match(r.headers.get('content-type'), /javascript/);
+  r = await fetch(base + '/..%2fsecret.txt');
+  assert.equal(r.status, 404);
+  r = await fetch(base + '/api/templates'); // API 는 여전히 키 필요
+  assert.equal(r.status, 401);
 });

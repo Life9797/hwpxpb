@@ -258,6 +258,30 @@ export class HwpxDocument {
     return { applied, rejected };
   }
 
+  /**
+   * 출력(인쇄·PDF)용: 값이 없는 누름틀의 안내문을 지운다. 한글에서 인쇄할 때 안내문이 안 나오는 것과 같다.
+   * 문서 안의 안내문 글자는 비우고, 누름틀 속성의 안내문(Direction)은 같은 길이의 공백으로 바꾼다
+   * (속성 길이 표기가 어긋나지 않게). 저장용이 아니라 출력 직전에만 쓴다.
+   */
+  hideGuides() {
+    for (const s of this.sections) {
+      let xml = this.xml(s);
+      const edits = [];
+      for (const f of iterFields(xml)) {
+        if (f.dirty) continue;
+        const blockEnd = xml.indexOf('</hp:fieldBegin>', f.tagStart);
+        const block = xml.slice(f.tagStart, blockEnd);
+        const blanked = block.replace(/(Direction:wstring:(\d+):)([\s\S]*?)( HelpState:)/, (_, a, n, _t, b) => a + ' '.repeat(Number(n)) + b);
+        if (blanked !== block) edits.push([f.tagStart, blockEnd, blanked]);
+        edits.push([f.start, f.end, xml.slice(f.start, f.end).replace(TEXT_RE, '<hp:t/>')]);
+      }
+      edits.sort((a, b) => b[0] - a[0]);
+      for (const [a, b, rep] of edits) xml = xml.slice(0, a) + rep + xml.slice(b);
+      this.entries[s] = enc.encode(xml);
+    }
+    return this;
+  }
+
   /** DB 컬럼 기준 추출: {table, values:{컬럼: 값}} */
   extract({ comboSep = ':' } = {}) {
     const raw = this.extractRaw();

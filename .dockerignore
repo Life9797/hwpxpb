@@ -1,5 +1,7 @@
 node_modules
 .build
-pb
+pb/dist
+pb/ocx/bin
+pb/ocx/obj
 docs
 .git

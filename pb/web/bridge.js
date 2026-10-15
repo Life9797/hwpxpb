@@ -57,6 +57,24 @@ async function load(bytes, keepMode = true) {
   if (keepMode) await setFormMode(state.mode === 'form');
 }
 
+/** 출력용 쪽 SVG 목록. 에디터에 출력용 문서를 잠시 열어 그리고, 보던 문서로 되돌린다 */
+async function renderPrintPages(comboSep) {
+  const shown = await buildDocument(comboSep);
+  const printDoc = new HwpxDocument(shown).hideGuides().toBytes();
+  const editor = document.getElementById('editor');
+  editor.style.visibility = 'hidden';
+  try {
+    await load(printDoc, false);
+    const pages = [];
+    const n = await state.studio.pageCount();
+    for (let p = 0; p < n; p++) pages.push(await state.studio.getPageSvg(p));
+    return pages;
+  } finally {
+    await load(shown);
+    editor.style.visibility = '';
+  }
+}
+
 const api = {
   /** 문서 열기. b64 = HWPX 파일 내용, mode = form | edit | view */
   async open(b64, fileName = 'document.hwpx', mode = 'form') {
@@ -108,17 +126,29 @@ const api = {
     return { ok: true, hwpx: toB64(await buildDocument(comboSep)) };
   },
 
-  /** PDF 인쇄용으로 모든 쪽을 SVG 로 깔아 둔다. 이후 OCX 가 WebView2 PrintToPdf 를 부른다 */
-  async preparePrint() {
+  /**
+   * 인쇄·PDF 준비: 출력용 문서(빈 칸 안내문 제외)의 모든 쪽을 SVG 로 #print-area 에 깐다.
+   * 이후 OCX 는 WebView2 인쇄/PrintToPdf 를, 브라우저는 window.print() 를 부른다.
+   */
+  async preparePrint(comboSep = ':') {
+    const pages = await renderPrintPages(comboSep);
     const area = document.getElementById('print-area');
-    area.replaceChildren();
-    const pages = await state.studio.pageCount();
-    for (let p = 0; p < pages; p++) {
-      const div = document.createElement('div');
-      div.innerHTML = await state.studio.getPageSvg(p);
-      area.append(div);
-    }
-    return { ok: true, pages };
+    area.replaceChildren(
+      ...pages.map((svg) => {
+        const div = document.createElement('div');
+        div.className = 'print-page';
+        div.innerHTML = svg;
+        return div;
+      }),
+    );
+    return { ok: true, pages: pages.length };
+  },
+
+  /** 인쇄 대화상자(미리보기)를 연다. 브라우저·WebView2 공통 */
+  async print(comboSep = ':') {
+    const r = await api.preparePrint(comboSep);
+    setTimeout(() => window.print(), 0); // 대화상자가 떠 있는 동안 호출이 끝나지 않도록 다음 틱에
+    return r;
   },
 };
 

@@ -9,14 +9,33 @@
 //   POST /api/extract?comboSep=:            본문 HWPX 에서 값 추출
 //   POST /api/schema                        본문 HWPX 의 개체 목록
 //   POST /api/pdf                           본문 HWPX → PDF
+//   GET  /                                  웹 에디터 (webDir 이 있을 때. 열기·저장·인쇄)
+//   GET  /?template=rx01                    등록된 양식을 에디터로 열기
 import { createServer } from 'node:http';
 import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 import { HwpxDocument } from 'hwpx-form-engine';
 import { hwpxToPdf } from './pdf.js';
 
 const ID_RE = /^[A-Za-z0-9가-힣_.-]{1,100}$/;
 const HWPX_TYPE = 'application/hwp+zip';
+const STATIC_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
+};
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -25,7 +44,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ templateDir, apiKey = '', maxBodyBytes = 50 * 1024 * 1024, pdf = {} } = {}) {
+export function createApp({ templateDir, webDir = '', apiKey = '', maxBodyBytes = 50 * 1024 * 1024, pdf = {} } = {}) {
   const templatePath = (id) => {
     if (!ID_RE.test(id) || id.startsWith('.')) throw new HttpError(400, '템플릿 ID 는 영문·숫자·한글·_ . - 만 쓸 수 있습니다');
     return join(templateDir, `${id}.hwpx`);
@@ -54,6 +73,10 @@ export function createApp({ templateDir, apiKey = '', maxBodyBytes = 50 * 1024 *
     const comboSep = url.searchParams.get('comboSep') ?? ':';
 
     if (path === '/health') return sendJson(res, 200, { ok: true });
+    // 웹 에디터 화면은 인증 없이 연다 (화면 파일만. 양식·API 는 아래에서 키 확인)
+    if (webDir && (req.method === 'GET' || req.method === 'HEAD') && !path.startsWith('/api/')) {
+      return sendStatic(res, webDir, path.slice(1));
+    }
     if (apiKey && req.headers['x-api-key'] !== apiKey) throw new HttpError(401, 'X-API-Key 가 필요합니다');
 
     if (req.method === 'GET' && path === '/api/templates') {
@@ -106,7 +129,8 @@ export function createApp({ templateDir, apiKey = '', maxBodyBytes = 50 * 1024 *
       const format = body.format ?? 'hwpx';
       res.setHeader('X-Fill-Result', encodeURIComponent(JSON.stringify(result)));
       if (format === 'hwpx') return sendBytes(res, hwpx, HWPX_TYPE, 'filled.hwpx');
-      const pdfBytes = await hwpxToPdf(hwpx, pdf);
+      // PDF 에는 빈 칸 안내문을 찍지 않는다 (한글 인쇄와 같게)
+      const pdfBytes = await hwpxToPdf(Buffer.from(openDoc(hwpx).hideGuides().toBytes()), pdf);
       if (format === 'pdf') return sendBytes(res, pdfBytes, 'application/pdf', 'filled.pdf');
       if (format === 'both') {
         return sendJson(res, 200, { ...result, hwpx: hwpx.toString('base64'), pdf: pdfBytes.toString('base64') });
@@ -122,9 +146,9 @@ export function createApp({ templateDir, apiKey = '', maxBodyBytes = 50 * 1024 *
       return sendJson(res, 200, { table: doc.dbTable, schema: doc.schema() });
     }
     if (req.method === 'POST' && path === '/api/pdf') {
-      const bytes = await readBody(req, maxBodyBytes);
-      openDoc(bytes);
-      return sendBytes(res, await hwpxToPdf(bytes, pdf), 'application/pdf', 'document.pdf');
+      const doc = openDoc(await readBody(req, maxBodyBytes));
+      const printable = Buffer.from(doc.hideGuides().toBytes());
+      return sendBytes(res, await hwpxToPdf(printable, pdf), 'application/pdf', 'document.pdf');
     }
     throw new HttpError(404, '없는 경로입니다');
   }
@@ -153,6 +177,25 @@ function readBody(req, limit) {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+async function sendStatic(res, root, rel) {
+  let p = normalize(decodeURIComponent(rel || 'index.html'));
+  if (p.endsWith(sep) || p === '.') p = join(p, 'index.html');
+  const file = join(root, p);
+  if (p.startsWith('..') || !file.startsWith(join(root, sep))) throw new HttpError(404, '없는 경로입니다');
+  let bytes;
+  try {
+    bytes = await readFile(file);
+  } catch {
+    throw new HttpError(404, '없는 경로입니다');
+  }
+  res.writeHead(200, {
+    'Content-Type': STATIC_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'Content-Length': bytes.length,
+    'Cache-Control': extname(file) === '.html' ? 'no-cache' : 'max-age=3600',
+  });
+  res.end(bytes);
 }
 
 function sendJson(res, status, obj) {

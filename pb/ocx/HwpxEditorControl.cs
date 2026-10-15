@@ -44,6 +44,11 @@ namespace Hwpxpb
         [DispId(21)] bool SetFieldValue(string column, string value, string comboSep);
         [DispId(22)] string GetFieldsTsv(string comboSep);
         [DispId(23)] string GetTable();
+        // 출력 (빈 칸 안내문은 찍지 않는다)
+        [DispId(24)] bool Print();
+        [DispId(25)] bool PrintTo(string printerName, int copies);
+        [DispId(26)] string GetPrinters();
+        [DispId(27)] string GetDefaultPrinter();
     }
 
     [ComVisible(true)]
@@ -219,16 +224,67 @@ namespace Hwpxpb
             catch (Exception ex) { return Fail(ex.Message); }
         }
 
+        /// <summary>인쇄 대화상자(미리보기)를 띄운다. 프린터·매수·쪽 범위는 사용자가 고른다.</summary>
+        public bool Print()
+        {
+            if (!Ok(Call("preparePrint"))) return false;
+            try
+            {
+                _web.CoreWebView2.ShowPrintUI(CoreWebView2PrintDialogKind.Browser);
+                return true;
+            }
+            catch (Exception ex) { return Fail(ex.Message); }
+        }
+
+        /// <summary>대화상자 없이 바로 인쇄. printerName 이 빈 문자열이면 기본 프린터.</summary>
+        public bool PrintTo(string printerName, int copies)
+        {
+            if (!Ok(Call("preparePrint"))) return false;
+            try
+            {
+                var settings = NewPrintSettings();
+                if (!string.IsNullOrEmpty(printerName)) settings.PrinterName = printerName;
+                settings.Copies = copies < 1 ? 1 : copies;
+                var status = Wait(_web.CoreWebView2.PrintAsync(settings));
+                switch (status)
+                {
+                    case CoreWebView2PrintStatus.Succeeded: return true;
+                    case CoreWebView2PrintStatus.PrinterUnavailable: return Fail("프린터를 쓸 수 없습니다: " + printerName);
+                    default: return Fail("인쇄 실패");
+                }
+            }
+            catch (Exception ex) { return Fail(ex.Message); }
+        }
+
+        /// <summary>설치된 프린터 이름 (줄바꿈으로 구분)</summary>
+        public string GetPrinters()
+        {
+            var names = new List<string>();
+            foreach (string n in System.Drawing.Printing.PrinterSettings.InstalledPrinters) names.Add(n);
+            return string.Join("\n", names);
+        }
+
+        public string GetDefaultPrinter()
+        {
+            return new System.Drawing.Printing.PrinterSettings().PrinterName;
+        }
+
+        private CoreWebView2PrintSettings NewPrintSettings()
+        {
+            var settings = _web.CoreWebView2.Environment.CreatePrintSettings();
+            settings.Orientation = PdfLandscape ? CoreWebView2PrintOrientation.Landscape : CoreWebView2PrintOrientation.Portrait;
+            settings.MarginTop = settings.MarginBottom = settings.MarginLeft = settings.MarginRight = 0;
+            settings.ShouldPrintBackgrounds = true;
+            settings.ShouldPrintHeaderAndFooter = false;
+            return settings;
+        }
+
         public bool SavePdf(string path)
         {
             if (!Ok(Call("preparePrint"))) return false;
             try
             {
-                var settings = _web.CoreWebView2.Environment.CreatePrintSettings();
-                settings.Orientation = PdfLandscape ? CoreWebView2PrintOrientation.Landscape : CoreWebView2PrintOrientation.Portrait;
-                settings.MarginTop = settings.MarginBottom = settings.MarginLeft = settings.MarginRight = 0;
-                settings.ShouldPrintBackgrounds = true;
-                settings.ShouldPrintHeaderAndFooter = false;
+                var settings = NewPrintSettings();
                 var ok = Wait(_web.CoreWebView2.PrintToPdfAsync(path, settings));
                 return ok || Fail("PDF 저장 실패: " + path);
             }
