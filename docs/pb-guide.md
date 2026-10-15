@@ -12,6 +12,8 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 ```
 
 ## 2. 빌드와 설치 (Windows)
+**빌드 없이 쓰려면** [Releases](https://github.com/Life9797/hwpxpb/releases) 의 `HwpxEditorOcx.zip` 을 받아 풀고 아래 3번부터 하면 됩니다. 이 zip 은 GitHub Actions(`ocx` 작업)가 Windows 에서 빌드합니다.
+
 1. 에디터 화면 `pb/dist` 는 저장소에 들어 있습니다. 에디터를 고쳤을 때만 `scripts/build-pb-web.sh` 로 다시 만듭니다 (Linux/WSL/macOS)
 2. OCX 빌드 (Windows, Visual Studio 2022 또는 .NET SDK): `dotnet build pb/ocx -c Release`
    → `pb/ocx/bin/Release/net48/` 에 `HwpxEditorOcx.dll`, `Microsoft.Web.WebView2.*.dll`, `web\` 가 생깁니다.
