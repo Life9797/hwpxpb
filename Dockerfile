@@ -7,6 +7,9 @@ FROM rust:1.93.1-bookworm AS rhwp
 ARG RHWP_REF=v0.8.7
 RUN git clone --depth 1 --branch ${RHWP_REF} https://github.com/edwardkim/rhwp.git /src
 WORKDIR /src
+# 표 칸 안 체크박스 등 그리기 보완 (patches/rhwp/README.md)
+COPY patches/rhwp /patches
+RUN git apply /patches/*.patch
 RUN cargo build --release --bin rhwp && strip target/release/rhwp
 
 # 2) 실행 이미지

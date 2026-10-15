@@ -14,6 +14,8 @@ OUT="$ROOT/pb/dist"
 mkdir -p "$BUILD"
 if [ ! -d "$RHWP/.git" ]; then
   git clone --depth 1 --branch "$RHWP_REF" https://github.com/edwardkim/rhwp.git "$RHWP"
+  # 표 칸 안 체크박스 등 그리기 보완 (patches/rhwp/README.md)
+  ( cd "$RHWP" && git apply "$ROOT"/patches/rhwp/*.patch )
 fi
 
 # 1) rhwp WASM + rhwp-studio (외부 웹폰트 끔: 폐쇄망·상업 환경)
