@@ -1,0 +1,42 @@
+name: ocx
+# PB 12.1 용 OCX 를 Windows 에서 빌드하고, 바로 쓸 수 있는 zip 을 만든다.
+# ocx-v* 태그를 올리면 그 zip 을 GitHub Release 에 첨부한다.
+on:
+  pull_request:
+    paths: ["pb/**", ".github/workflows/ocx.yml"]
+  push:
+    branches: [main]
+    tags: ["ocx-v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: OCX 빌드 (net48, x86)
+        run: dotnet build pb/ocx/HwpxEditorOcx.csproj -c Release -o out/HwpxEditorOcx
+      - name: zip 만들기
+        shell: pwsh
+        run: |
+          $d = "out/HwpxEditorOcx"
+          Copy-Item pb/ocx/register.bat, pb/ocx/unregister.bat, LICENSE $d
+          Copy-Item pb/ocx/README-설치.txt "$d/README.txt"
+          Remove-Item "$d/*.pdb" -ErrorAction SilentlyContinue
+          if (!(Test-Path "$d/HwpxEditorOcx.dll")) { throw "HwpxEditorOcx.dll 없음" }
+          if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
+          Get-ChildItem $d | Format-Table Name, Length
+          Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditorOcx.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HwpxEditorOcx
+          path: out/HwpxEditorOcx.zip
+      - name: Release 에 첨부
+        if: startsWith(github.ref, 'refs/tags/ocx-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --prerelease --title "OCX ${{ github.ref_name }}" --notes-file pb/ocx/README-설치.txt
