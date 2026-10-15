@@ -1,0 +1,8 @@
+{
+  "name": "hwpxpb",
+  "private": true,
+  "workspaces": ["engine", "server"],
+  "scripts": {
+    "test": "npm test --workspaces"
+  }
+}

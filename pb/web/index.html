@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>hwpxpb</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+    #editor { width: 100%; height: 100%; }
+    #print-area { display: none; }
+    @media print {
+      @page { margin: 0; }
+      #editor { display: none; }
+      #print-area { display: block; }
+      #print-area > div { page-break-after: always; }
+      #print-area svg { width: 100%; height: auto; display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div id="editor"></div>
+  <div id="print-area"></div>
+  <script type="importmap">{ "imports": { "fflate": "./vendor/fflate/browser.js" } }</script>
+  <script type="module" src="./bridge.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+services:
+  server:
+    build: .
+    image: hwpxpb-server
+    ports:
+      - "8080:8080"
+    environment:
+      # 비워 두면 인증 없이 동작. 운영에서는 반드시 설정
+      API_KEY: ${API_KEY:-}
+    volumes:
+      - hwpxpb-data:/data
+    restart: unless-stopped
+
+volumes:
+  hwpxpb-data:
