@@ -16,5 +16,5 @@ HwpxEditorOcx - PowerBuilder 12.1 용 HWPX 에디터 OLE 컨트롤 (빌드된 �
   web\                                                  에디터 화면 (rhwp-studio + 브리지)
   register.bat / unregister.bat                         등록 / 해제
 
-사용법(메서드, 이벤트, PB 예제): https://github.com/Life9797/hwpxpb/blob/main/docs/pb-guide.md
+사용법(메서드, 이벤트, PB 예제): https://github.com/Life9797/hwpxpb/blob/feat/initial-scaffold/docs/pb-guide.md (병합 후에는 main)
 라이선스: MIT (LICENSE). 에디터 엔진 rhwp 는 MIT, Copyright Edward Kim (web\studio\RHWP-LICENSE.txt).
