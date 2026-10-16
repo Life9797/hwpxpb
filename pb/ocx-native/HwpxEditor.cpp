@@ -812,6 +812,9 @@ private:
 		if (!bad && SUCCEEDED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream))) {
 			std::wstring headers = std::wstring(L"Content-Type: ") + MimeType(rel) + L"\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache";
 			m_env->CreateWebResourceResponse(stream, 200, L"OK", headers.c_str(), &response);
+		} else if (rel == L"favicon.ico") {
+			// 브라우저가 자동으로 찾는 아이콘. 없어도 되므로 상태에 남기지 않는다
+			m_env->CreateWebResourceResponse(nullptr, 204, L"No Content", L"", &response);
 		} else {
 			m_missing = path;
 			if (!m_ready) m_status = L"화면 파일을 찾지 못했습니다: " + path;
