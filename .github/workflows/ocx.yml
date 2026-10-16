@@ -22,6 +22,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
+      - name: ATL 설치 (러너의 Visual Studio 에 없으면)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\include\atlbase.h" -ErrorAction SilentlyContinue) { Write-Output "ATL 있음"; exit 0 }
+          $p = Start-Process -Wait -PassThru -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList @('modify', '--installPath', "`"$vs`"", '--add', 'Microsoft.VisualStudio.Component.VC.ATL', '--quiet', '--norestart', '--nocache')
+          Write-Output "vs_installer exit $($p.ExitCode)"
+          if (!(Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\include\atlbase.h" -ErrorAction SilentlyContinue)) { Write-Output "::error::ATL 설치 실패 ($($p.ExitCode))"; exit 1 }
       - name: WebView2 SDK 받기
         run: nuget install Microsoft.Web.WebView2 -Version 1.0.4078.44 -OutputDirectory pb/ocx-native/packages
       - name: OCX 빌드 (C++/ATL, Win32)
