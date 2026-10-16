@@ -25,7 +25,13 @@ jobs:
       - name: WebView2 SDK 받기
         run: nuget install Microsoft.Web.WebView2 -Version 1.0.4078.44 -OutputDirectory pb/ocx-native/packages
       - name: OCX 빌드 (C++/ATL, Win32)
-        run: msbuild pb/ocx-native/HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /nologo /v:minimal
+        shell: pwsh
+        run: |
+          msbuild pb/ocx-native/HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /nologo /v:minimal | Tee-Object build.log
+          $code = $LASTEXITCODE
+          # 오류 줄을 annotation 으로도 남긴다 (로그를 못 볼 때 원인 확인용)
+          Select-String -Path build.log -Pattern ': (fatal )?error ' | Select-Object -First 30 | ForEach-Object { Write-Output "::error::$($_.Line.Trim())" }
+          exit $code
       - name: zip 만들기
         shell: pwsh
         run: |
