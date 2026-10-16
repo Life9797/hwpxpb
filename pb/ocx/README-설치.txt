@@ -15,6 +15,13 @@ HwpxEditorOcx - PowerBuilder 12.1 용 HWPX 에디터 OLE 컨트롤 (빌드된 �
    없으면 Microsoft 의 "WebView2 Evergreen Bootstrapper" 로 설치합니다.
 4. PB 창 페인터 → Insert → OLE → Insert Control 탭 → HwpxEditorControl (Hwpxpb.Editor) 선택.
 
+Windows 7 에서 쓸 때
+  - Windows 7 SP1 이어야 합니다. .NET Framework 4.8 은 Windows 7 SP1 에 설치됩니다.
+  - WebView2 런타임은 Windows 7 에서 109 버전이 마지막입니다. 이 에디터는 109 에서 쓰는 기능만 씁니다.
+    PC 에 런타임을 설치하는 대신, 109 "고정 버전(Fixed Version)" 런타임(x86)을 받아 이 폴더 안의
+    webview2\ 폴더에 풀어 두면 그것을 씁니다 (webview2\msedgewebview2.exe 가 있어야 함).
+  - Windows 7 은 Microsoft 지원이 끝난 OS 라 보안 업데이트가 없습니다.
+
 들어 있는 파일
   HwpxEditorOcx.dll, HwpxEditorOcx.tlb(등록 시 생성)   OLE 컨트롤
   Microsoft.Web.WebView2.*.dll, WebView2Loader.dll     WebView2

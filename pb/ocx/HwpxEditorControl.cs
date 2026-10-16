@@ -105,11 +105,15 @@ namespace Hwpxpb
             try
             {
                 var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "hwpxpb", "WebView2");
-                var env = await CoreWebView2Environment.CreateAsync(null, dataDir);
+                var baseDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                // 설치 폴더에 webview2\ (고정 버전 런타임)가 있으면 그것을 쓴다. 없으면 PC 에 설치된 런타임
+                var fixedRuntime = Path.Combine(baseDir, "webview2");
+                var browserDir = File.Exists(Path.Combine(fixedRuntime, "msedgewebview2.exe")) ? fixedRuntime : null;
+                var env = await CoreWebView2Environment.CreateAsync(browserDir, dataDir);
                 await _web.EnsureCoreWebView2Async(env);
                 var folder = WebFolder;
                 if (string.IsNullOrEmpty(folder))
-                    folder = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "web");
+                    folder = Path.Combine(baseDir, "web");
                 _web.CoreWebView2.SetVirtualHostNameToFolderMapping(Host, folder, CoreWebView2HostResourceAccessKind.Allow);
                 _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                 _web.CoreWebView2.Settings.AreDevToolsEnabled = false;

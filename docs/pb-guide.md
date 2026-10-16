@@ -22,6 +22,11 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
    - 경고 `RA0000` (/codebase, 서명되지 않은 어셈블리) 은 무시해도 됩니다.
 4. WebView2 런타임: Windows 10/11 은 대부분 기본 설치. 없으면 Microsoft "Evergreen Bootstrapper" 로 설치.
 
+### Windows 7
+- Windows 7 **SP1** 이 필요합니다. .NET Framework 4.8 은 Windows 7 SP1 에 설치됩니다.
+- WebView2 런타임은 Windows 7 에서 **109** 가 마지막 버전입니다. 에디터 화면은 109 에서 쓰는 기능만 씁니다 (배포본의 JS 를 검사함, 실제 Win7 시험은 아직 안 함).
+- 런타임을 PC 마다 설치하지 않으려면 109 **고정 버전(Fixed Version) x86** 런타임을 설치 폴더의 `webview2\` 에 풀어 둡니다. OCX 는 `webview2\msedgewebview2.exe` 가 있으면 그것을 씁니다.
+
 ## 3. PB 화면에 넣기
 창 페인터 → Insert → OLE → **Insert Control** 탭 → `HwpxEditorControl` (ProgID `Hwpxpb.Editor`) 선택.
 컨트롤 이름을 `ole_hwp` 로 둡니다. 이벤트 목록에 `ready`, `loaded`, `erroroccurred` 가 생깁니다.
