@@ -731,9 +731,24 @@ private:
 			&token);
 		// 화면 스크립트 오류를 PB 쪽에서 볼 수 있게 (Status / LastError)
 		m_web->AddScriptToExecuteOnDocumentCreated(
-			L"(function(){function s(m){try{window.chrome.webview.postMessage(JSON.stringify({event:'jserror',message:String(m)}));}catch(e){}}"
-			L"window.addEventListener('error',function(e){s((e.message||'error')+' @'+(e.filename||'')+':'+(e.lineno||0));});"
-			L"window.addEventListener('unhandledrejection',function(e){var r=e.reason;s('Promise: '+(r&&r.message||r));});})();",
+			L"(function(){\n"
+			L"var top=window.top===window;\n"
+			L"// 서비스 워커는 쓰지 않는다 (OCX 는 파일을 직접 넘겨 주므로 캐시가 오히려 방해)\n"
+			L"try{if(navigator.serviceWorker){navigator.serviceWorker.register=function(){return new Promise(function(){});};\n"
+			L"navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});});}}catch(e){}\n"
+			L"function s(m){m=String(m);try{(window.top.__hwpxErrs=window.top.__hwpxErrs||[]).push(m);}catch(e){}\n"
+			L"try{(window.top.chrome||window.chrome).webview.postMessage(JSON.stringify({event:'jserror',message:m}));}catch(e){}}\n"
+			L"window.addEventListener('error',function(e){var t=e.target;\n"
+			L"if(t&&t!==window&&(t.src||t.href)){s('파일을 읽지 못함: '+(t.src||t.href));return;}\n"
+			L"s((e.message||'error')+' @'+(e.filename||'')+':'+(e.lineno||0));},true);\n"
+			L"window.addEventListener('unhandledrejection',function(e){var r=e.reason;s('Promise: '+(r&&(r.stack||r.message)||r));});\n"
+			L"if(!top)return;\n"
+			L"// 20초 안에 준비되지 않으면 원인을 화면에 직접 보여 준다\n"
+			L"setTimeout(function(){if(window.__hwpxReady)return;var d=document.createElement('pre');\n"
+			L"d.style.cssText='position:fixed;left:0;top:0;right:0;z-index:2147483647;margin:0;padding:10px;background:#fff3f3;color:#b42318;font:12px/1.5 monospace;white-space:pre-wrap;border-bottom:2px solid #b42318;max-height:60%;overflow:auto';\n"
+			L"var errs=window.__hwpxErrs||[];d.textContent='에디터가 시작되지 않았습니다. 아래 내용을 보내 주세요.\\n'+navigator.userAgent+'\\n'+(errs.length?errs.join('\\n'):'(스크립트 오류 없음)');\n"
+			L"(document.body||document.documentElement).appendChild(d);},20000);\n"
+			L"})();\n",
 			nullptr);
 		m_web->add_NavigationCompleted(
 			Callback<ICoreWebView2NavigationCompletedEventHandler>(
@@ -824,6 +839,7 @@ private:
 		if (ev == L"ready") {
 			// 권한을 먼저 넘긴 뒤 PB 에 Ready 를 알린다
 			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setPermission(") + (m_allowEdit ? L"true" : L"false") + L")").c_str(), nullptr);
+			m_web->ExecuteScript(L"window.__hwpxReady=true", nullptr);
 			m_ready = true;
 			m_status = L"준비됨";
 			QueueEvent(1);
