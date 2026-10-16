@@ -736,18 +736,28 @@ private:
 			L"// 서비스 워커는 쓰지 않는다 (OCX 는 파일을 직접 넘겨 주므로 캐시가 오히려 방해)\n"
 			L"try{if(navigator.serviceWorker){navigator.serviceWorker.register=function(){return new Promise(function(){});};\n"
 			L"navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});});}}catch(e){}\n"
-			L"function s(m){m=String(m);try{(window.top.__hwpxErrs=window.top.__hwpxErrs||[]).push(m);}catch(e){}\n"
-			L"try{(window.top.chrome||window.chrome).webview.postMessage(JSON.stringify({event:'jserror',message:m}));}catch(e){}}\n"
+			L"var where=top?'':'[studio] ';\n"
+			L"function s(m,post){m=where+String(m);try{var T=window.top;(T.__hwpxErrs=T.__hwpxErrs||[]).push(m);if(T.__hwpxShow)T.__hwpxShow();}catch(e){}\n"
+			L"if(post===false)return;try{(window.top.chrome||window.chrome).webview.postMessage(JSON.stringify({event:'jserror',message:m}));}catch(e){}}\n"
 			L"window.addEventListener('error',function(e){var t=e.target;\n"
 			L"if(t&&t!==window&&(t.src||t.href)){s('파일을 읽지 못함: '+(t.src||t.href));return;}\n"
 			L"s((e.message||'error')+' @'+(e.filename||'')+':'+(e.lineno||0));},true);\n"
 			L"window.addEventListener('unhandledrejection',function(e){var r=e.reason;s('Promise: '+(r&&(r.stack||r.message)||r));});\n"
+			L"// 콘솔 오류도 모은다 (에디터가 잡아서 콘솔에만 남기는 오류)\n"
+			L"['error','warn'].forEach(function(k){var o=console[k];console[k]=function(){try{s('console.'+k+': '+Array.prototype.map.call(arguments,function(a){return a&&a.stack?a.stack:(typeof a==='object'?JSON.stringify(a):String(a));}).join(' '),false);}catch(e){}return o.apply(console,arguments);};});\n"
 			L"if(!top)return;\n"
-			L"// 20초 안에 준비되지 않으면 원인을 화면에 직접 보여 준다\n"
-			L"setTimeout(function(){if(window.__hwpxReady)return;var d=document.createElement('pre');\n"
-			L"d.style.cssText='position:fixed;left:0;top:0;right:0;z-index:2147483647;margin:0;padding:10px;background:#fff3f3;color:#b42318;font:12px/1.5 monospace;white-space:pre-wrap;border-bottom:2px solid #b42318;max-height:60%;overflow:auto';\n"
-			L"var errs=window.__hwpxErrs||[];d.textContent='에디터가 시작되지 않았습니다. 아래 내용을 보내 주세요.\\n'+navigator.userAgent+'\\n'+(errs.length?errs.join('\\n'):'(스크립트 오류 없음)');\n"
-			L"(document.body||document.documentElement).appendChild(d);},20000);\n"
+			L"var t0=Date.now(),box=null;\n"
+			L"function info(){var f=document.querySelector('#editor iframe'),d='없음';\n"
+			L"if(f){var st='?',rs='?';try{st=f.contentDocument?f.contentDocument.readyState:'문서 없음';rs=f.contentWindow&&f.contentWindow.rhwpStudio?'있음':'없음';}catch(e){st='접근 불가 '+e.message;}\n"
+			L"d=f.src+' / '+st+' / rhwpStudio '+rs;}\n"
+			L"return '경과 '+Math.round((Date.now()-t0)/1000)+'초 / hwpBridge '+(window.hwpBridge?'있음':'없음')+' / bridgeReady '+(window.hwpBridgeReady?'예':'아니오')+'\\n편집기 iframe: '+d;}\n"
+			L"window.__hwpxShow=function(){if(!box||window.__hwpxReady)return;var errs=window.__hwpxErrs||[];\n"
+			L"box.textContent='에디터가 시작되지 않았습니다. 아래 내용을 보내 주세요.\\n'+navigator.userAgent+'\\n'+info()+'\\n'+(errs.length?errs.slice(-30).join('\\n'):'(스크립트 오류 없음)');};\n"
+			L"// 20초 안에 준비되지 않으면 원인을 화면에 직접 보여 주고, 이후 2초마다 갱신한다\n"
+			L"setTimeout(function(){if(window.__hwpxReady)return;box=document.createElement('pre');\n"
+			L"box.style.cssText='position:fixed;left:0;top:0;right:0;z-index:2147483647;margin:0;padding:10px;background:#fff3f3;color:#b42318;font:12px/1.5 monospace;white-space:pre-wrap;word-break:break-all;border-bottom:2px solid #b42318;max-height:80%;overflow:auto;user-select:text';\n"
+			L"(document.body||document.documentElement).appendChild(box);window.__hwpxShow();\n"
+			L"var iv=setInterval(function(){if(window.__hwpxReady){clearInterval(iv);box.remove();return;}window.__hwpxShow();},2000);},20000);\n"
 			L"})();\n",
 			nullptr);
 		m_web->add_NavigationCompleted(
@@ -802,9 +812,10 @@ private:
 		size_t cut = rel.find_first_of(L"?#");
 		if (cut != std::wstring::npos) rel = rel.substr(0, cut);
 		rel = UrlDecode(rel);
-		if (rel.empty()) rel = L"index.html";
 		for (auto& c : rel)
 			if (c == L'/') c = L'\\';
+		// 폴더 주소(예: /studio/)는 그 안의 index.html
+		if (rel.empty() || rel.back() == L'\\') rel += L"index.html";
 		CComPtr<ICoreWebView2WebResourceResponse> response;
 		CComPtr<IStream> stream;
 		std::wstring path = m_folder + L"\\" + rel;
