@@ -13,6 +13,8 @@
    - Windows 7 SP1: WebView2 는 109 버전이 마지막입니다. 109 런타임을 설치하거나,
      109 "고정 버전(Fixed Version)" x86 런타임을 이 폴더의 webview2\ 에 풀어 둡니다
      (webview2\msedgewebview2.exe 가 있으면 PC 에 설치된 런타임 대신 그것을 씁니다).
+     HwpxEditor-native-win7.zip 에는 이 webview2\ 폴더가 이미 들어 있어 따로 설치할 것이 없습니다.
+     (최신 런타임 설치기는 Windows 7 에서 "PackageIdFromFullName" 오류로 실행되지 않습니다)
 5. PB 창 페인터 → Insert → OLE → Insert Control 탭 → HwpxEditorControl (Hwpxpb.Editor) 선택.
 
 권한

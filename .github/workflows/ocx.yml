@@ -66,10 +66,30 @@ jobs:
           if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
           Get-ChildItem $d | Format-Table Name, Length
           Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditor-native.zip
+      - name: Windows 7 용 zip (WebView2 109 고정 버전 x86 포함)
+        shell: pwsh
+        run: |
+          # 최신 런타임 설치기는 Windows 7 에서 실행되지 않는다. 109 는 Windows 7 을 지원하는 마지막 버전.
+          $url = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/671744ba-8b1f-42e2-878c-d7ae8ee081c4/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.69.x86.cab"
+          Invoke-WebRequest $url -OutFile wv2.cab
+          $sig = Get-AuthenticodeSignature wv2.cab
+          Write-Output "::notice::cab 서명 $($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Microsoft') { throw "cab 서명 확인 실패" }
+          New-Item -ItemType Directory wv2 | Out-Null
+          expand.exe wv2.cab -F:* wv2 | Out-Null
+          $exe = Get-ChildItem wv2 -Recurse -Filter msedgewebview2.exe | Select-Object -First 1
+          if (!$exe) { throw "msedgewebview2.exe 없음" }
+          $d = "out/HwpxEditor-native"
+          Move-Item $exe.Directory.FullName "$d/webview2"
+          Write-Output "::notice::webview2 $((Get-Item "$d/webview2/msedgewebview2.exe").VersionInfo.ProductVersion)"
+          Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditor-native-win7.zip
+          Get-ChildItem out/*.zip | ForEach-Object { Write-Output "::notice::$($_.Name) $([math]::Round($_.Length/1MB,1)) MB" }
       - uses: actions/upload-artifact@v4
         with:
           name: HwpxEditor-native
-          path: out/HwpxEditor-native.zip
+          path: |
+            out/HwpxEditor-native.zip
+            out/HwpxEditor-native-win7.zip
 
   dotnet:
     runs-on: windows-latest
@@ -112,10 +132,11 @@ jobs:
           TAG: ${{ inputs.release || github.ref_name }}
         run: |
           cat > notes.md <<'NOTES'
+          - **HwpxEditor-native-win7.zip**: C++ 판 + WebView2 109 런타임(webview2 폴더) 포함. Windows 7 은 이것을 쓰세요. 런타임 설치가 필요 없습니다.
           - **HwpxEditor-native.zip**: C++ 판. .NET 이 필요 없습니다 (Windows 7 SP1, .NET 4.0 PC 포함). 압축을 풀고 관리자 권한으로 register.bat.
           - **HwpxEditorOcx.zip**: .NET Framework 4.8 판.
 
           두 판은 ProgID(Hwpxpb.Editor)·메서드·이벤트가 같아 PB 코드는 그대로 씁니다. 한 PC 에는 하나만 등록하세요.
           설치 안내는 각 zip 의 README.txt 에 있습니다.
           NOTES
-          gh release create "$TAG" out/HwpxEditor-native.zip out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "OCX $TAG" --notes-file notes.md
+          gh release create "$TAG" out/*.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "OCX $TAG" --notes-file notes.md
