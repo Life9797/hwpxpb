@@ -29,18 +29,18 @@ jobs:
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $def = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
           $has = { param($v) Test-Path "$vs\VC\Tools\MSVC\$v\atlmfc\include\atlbase.h" }
-          Get-ChildItem "$vs\VC\Tools\MSVC" | ForEach-Object { Write-Output "MSVC $($_.Name) ATL=$(& $has $_.Name)" }
-          Write-Output "기본 MSVC $def"
+          Get-ChildItem "$vs\VC\Tools\MSVC" | ForEach-Object { Write-Output "::notice::MSVC $($_.Name) ATL=$(& $has $_.Name)" }
+          Write-Output "::notice::기본 MSVC $def"
           if (!(& $has $def)) {
             $p = Start-Process -Wait -PassThru -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList @('modify', '--installPath', "`"$vs`"", '--add', 'Microsoft.VisualStudio.Component.VC.ATL', '--quiet', '--norestart', '--nocache')
-            Write-Output "vs_installer exit $($p.ExitCode)"
+            Write-Output "::notice::vs_installer exit $($p.ExitCode)"
           }
           $tools = ""
           if (!(& $has $def)) {
             $alt = Get-ChildItem "$vs\VC\Tools\MSVC" | Where-Object { & $has $_.Name } | Sort-Object Name -Descending | Select-Object -First 1
             if (!$alt) { Write-Output "::error::ATL 이 있는 MSVC 가 없습니다"; exit 1 }
             $tools = "/p:VCToolsVersion=$($alt.Name)"
-            Write-Output "ATL 이 있는 MSVC $($alt.Name) 사용"
+            Write-Output "::notice::ATL 이 있는 MSVC $($alt.Name) 사용"
           }
           "tools=$tools" >> $env:GITHUB_OUTPUT
       - name: WebView2 SDK 받기
