@@ -62,6 +62,7 @@ jobs:
           Copy-Item pb/ocx-native/bin/HwpxEditor.ocx, pb/ocx-native/register.bat, pb/ocx-native/unregister.bat, LICENSE $d
           Copy-Item pb/ocx-native/README-설치.txt "$d/README.txt"
           Copy-Item pb/dist "$d/web" -Recurse
+          Copy-Item examples/pb "$d/pb-example" -Recurse
           if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
           Get-ChildItem $d | Format-Table Name, Length
           Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditor-native.zip

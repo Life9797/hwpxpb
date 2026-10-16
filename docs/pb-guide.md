@@ -100,6 +100,8 @@ ole_hwp.object.SetMode("edit")    // 권한이 없으면 false
 
 ## 6. PowerScript 예시
 
+바로 가져와 쓸 수 있는 예제 창은 [`examples/pb`](../examples/pb/) 에 있습니다 (파일 열기, DW → 문서 값 대입, 문서 → DW 값 추출, 저장, 인쇄).
+
 ```powerscript
 // 창 open 이벤트: 에디터가 준비되면 ready 이벤트가 온다
 // (ole_hwp 는 화면에 놓인 OLE 컨트롤)
