@@ -541,6 +541,8 @@ private:
 	std::wstring m_browserVersion;
 	long m_timeout = 60;
 	std::wstring m_webFolder;
+	std::wstring m_folder;  // 실제로 쓰는 web 폴더
+	std::wstring m_missing; // 마지막으로 못 찾은 화면 파일
 	bool m_landscape = false;
 	bool m_allowEdit = false;
 	int m_nextCallId = 0;
@@ -704,8 +706,18 @@ private:
 			Fail(L"에디터 화면 폴더가 없습니다: " + folder + L"\\index.html (zip 의 web 폴더를 OCX 옆에 두세요)");
 			return;
 		}
-		w3->SetVirtualHostNameToFolderMapping(kHost, folder.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+		// 가상 호스트 매핑(SetVirtualHostNameToFolderMapping) 대신 요청을 직접 받아 파일을 돌려준다.
+		// Windows 7 + 109 런타임에서 매핑이 "파일 없음" 페이지를 내는 경우가 있어서, 경로 문제를 Status 로 보이게 한다.
+		m_folder = folder;
 		EventRegistrationToken token;
+		m_web->AddWebResourceRequestedFilter((std::wstring(L"https://") + kHost + L"/*").c_str(), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
+		m_web->add_WebResourceRequested(
+			Callback<ICoreWebView2WebResourceRequestedEventHandler>(
+				[this](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
+					ServeFile(args);
+					return S_OK;
+				}).Get(),
+			&token);
 		m_web->add_WebMessageReceived(
 			Callback<ICoreWebView2WebMessageReceivedEventHandler>(
 				[this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
@@ -733,13 +745,64 @@ private:
 					} else {
 						COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
 						args->get_WebErrorStatus(&st);
-						Fail(L"에디터 화면을 열지 못했습니다 (WebErrorStatus " + std::to_wstring(static_cast<int>(st)) + L")");
+						Fail(L"에디터 화면을 열지 못했습니다 (WebErrorStatus " + std::to_wstring(static_cast<int>(st)) + L")" +
+						     (m_missing.empty() ? L"" : L" 못 찾은 파일: " + m_missing));
 					}
 					return S_OK;
 				}).Get(),
 			&token);
 		m_status = L"에디터 화면 여는 중: " + folder;
 		m_web->Navigate((std::wstring(L"https://") + kHost + L"/index.html").c_str());
+	}
+
+	static const wchar_t* MimeType(const std::wstring& path) {
+		static const struct { const wchar_t* ext; const wchar_t* type; } types[] = {
+			{L".html", L"text/html; charset=utf-8"}, {L".js", L"text/javascript; charset=utf-8"},
+			{L".mjs", L"text/javascript; charset=utf-8"}, {L".css", L"text/css; charset=utf-8"},
+			{L".wasm", L"application/wasm"}, {L".json", L"application/json"},
+			{L".webmanifest", L"application/manifest+json"}, {L".svg", L"image/svg+xml"},
+			{L".png", L"image/png"}, {L".ico", L"image/x-icon"}, {L".woff2", L"font/woff2"},
+			{L".woff", L"font/woff"}, {L".ttf", L"font/ttf"}, {L".txt", L"text/plain; charset=utf-8"},
+		};
+		size_t dot = path.find_last_of(L'.');
+		if (dot != std::wstring::npos) {
+			std::wstring ext = path.substr(dot);
+			for (auto& c : ext) c = static_cast<wchar_t>(towlower(c));
+			for (auto& t : types)
+				if (ext == t.ext) return t.type;
+		}
+		return L"application/octet-stream";
+	}
+
+	void ServeFile(ICoreWebView2WebResourceRequestedEventArgs* args) {
+		if (!m_env) return;
+		CComPtr<ICoreWebView2WebResourceRequest> request;
+		LPWSTR uri = nullptr;
+		if (FAILED(args->get_Request(&request)) || !request || FAILED(request->get_Uri(&uri)) || !uri) return;
+		std::wstring u = uri;
+		CoTaskMemFree(uri);
+		std::wstring prefix = std::wstring(L"https://") + kHost + L"/";
+		if (u.compare(0, prefix.size(), prefix) != 0) return;
+		std::wstring rel = u.substr(prefix.size());
+		size_t cut = rel.find_first_of(L"?#");
+		if (cut != std::wstring::npos) rel = rel.substr(0, cut);
+		rel = UrlDecode(rel);
+		if (rel.empty()) rel = L"index.html";
+		for (auto& c : rel)
+			if (c == L'/') c = L'\\';
+		CComPtr<ICoreWebView2WebResourceResponse> response;
+		CComPtr<IStream> stream;
+		std::wstring path = m_folder + L"\\" + rel;
+		bool bad = rel.find(L"..") != std::wstring::npos;
+		if (!bad && SUCCEEDED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream))) {
+			std::wstring headers = std::wstring(L"Content-Type: ") + MimeType(rel) + L"\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache";
+			m_env->CreateWebResourceResponse(stream, 200, L"OK", headers.c_str(), &response);
+		} else {
+			m_missing = path;
+			if (!m_ready) m_status = L"화면 파일을 찾지 못했습니다: " + path;
+			m_env->CreateWebResourceResponse(nullptr, 404, L"Not Found", L"Content-Type: text/plain", &response);
+		}
+		if (response) args->put_Response(response);
 	}
 
 	void OnMessage(const std::wstring& m) {
