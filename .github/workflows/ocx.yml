@@ -22,20 +22,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
-      - name: ATL 설치 (러너의 Visual Studio 에 없으면)
+      - name: ATL 준비 (러너의 기본 MSVC 에 없으면 설치, 그래도 없으면 ATL 이 있는 MSVC 를 쓴다)
+        id: atl
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-          if (Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\include\atlbase.h" -ErrorAction SilentlyContinue) { Write-Output "ATL 있음"; exit 0 }
-          $p = Start-Process -Wait -PassThru -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList @('modify', '--installPath', "`"$vs`"", '--add', 'Microsoft.VisualStudio.Component.VC.ATL', '--quiet', '--norestart', '--nocache')
-          Write-Output "vs_installer exit $($p.ExitCode)"
-          if (!(Get-ChildItem "$vs\VC\Tools\MSVC\*\atlmfc\include\atlbase.h" -ErrorAction SilentlyContinue)) { Write-Output "::error::ATL 설치 실패 ($($p.ExitCode))"; exit 1 }
+          $def = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          $has = { param($v) Test-Path "$vs\VC\Tools\MSVC\$v\atlmfc\include\atlbase.h" }
+          Get-ChildItem "$vs\VC\Tools\MSVC" | ForEach-Object { Write-Output "MSVC $($_.Name) ATL=$(& $has $_.Name)" }
+          Write-Output "기본 MSVC $def"
+          if (!(& $has $def)) {
+            $p = Start-Process -Wait -PassThru -FilePath "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe" -ArgumentList @('modify', '--installPath', "`"$vs`"", '--add', 'Microsoft.VisualStudio.Component.VC.ATL', '--quiet', '--norestart', '--nocache')
+            Write-Output "vs_installer exit $($p.ExitCode)"
+          }
+          $tools = ""
+          if (!(& $has $def)) {
+            $alt = Get-ChildItem "$vs\VC\Tools\MSVC" | Where-Object { & $has $_.Name } | Sort-Object Name -Descending | Select-Object -First 1
+            if (!$alt) { Write-Output "::error::ATL 이 있는 MSVC 가 없습니다"; exit 1 }
+            $tools = "/p:VCToolsVersion=$($alt.Name)"
+            Write-Output "ATL 이 있는 MSVC $($alt.Name) 사용"
+          }
+          "tools=$tools" >> $env:GITHUB_OUTPUT
       - name: WebView2 SDK 받기
         run: nuget install Microsoft.Web.WebView2 -Version 1.0.4078.44 -OutputDirectory pb/ocx-native/packages
       - name: OCX 빌드 (C++/ATL, Win32)
         shell: pwsh
         run: |
-          msbuild pb/ocx-native/HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /nologo /v:minimal | Tee-Object build.log
+          msbuild pb/ocx-native/HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32 ${{ steps.atl.outputs.tools }} /m /nologo /v:minimal | Tee-Object build.log
           $code = $LASTEXITCODE
           # 오류 줄을 annotation 으로도 남긴다 (로그를 못 볼 때 원인 확인용)
           Select-String -Path build.log -Pattern ': (fatal )?error ' | Select-Object -First 30 | ForEach-Object { Write-Output "::error::$($_.Line.Trim())" }
