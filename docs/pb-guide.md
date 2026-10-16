@@ -5,25 +5,41 @@ PB 창 안에 HWPX 에디터를 OLE 컨트롤로 넣고, 누름틀·체크박스
 
 ## 1. 구성
 ```
-PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
+PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx-native C++ 판 또는 pb/ocx .NET 판, 32비트 ActiveX)
                  └─ Microsoft Edge WebView2 ── 설치 폴더\web\ (pb/dist)
                       ├─ rhwp-studio (HWP/HWPX 편집기, WASM)
                       └─ bridge.js + 값 대입/추출 엔진(engine/)
 ```
 
 ## 2. 빌드와 설치 (Windows)
-**빌드 없이 쓰려면** [Releases](https://github.com/Life9797/hwpxpb/releases) 의 `HwpxEditorOcx.zip` 을 받아 풀고 아래 3번부터 하면 됩니다. 이 zip 은 GitHub Actions(`ocx` 작업)가 Windows 에서 빌드합니다.
+OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤트가 같아 PB 코드는 어느 쪽이든 그대로 씁니다. **한 PC 에는 하나만 등록하세요.**
 
+| | C++ 판 (`pb/ocx-native`) | .NET 판 (`pb/ocx`) |
+|---|---|---|
+| 필요한 것 | WebView2 런타임만 | .NET Framework **4.8** + WebView2 런타임 |
+| 맞는 PC | .NET 4.0 만 있는 PC, Windows 7 SP1 포함 **(권장)** | .NET 4.8 을 깔 수 있는 PC |
+| 파일 | `HwpxEditor.ocx` 하나 + `web\` | `HwpxEditorOcx.dll` + WebView2 DLL + `web\` |
+| 등록 | `register.bat` (32비트 regsvr32) | `register.bat` (32비트 regasm) |
+
+**빌드 없이 쓰려면** [Releases](https://github.com/Life9797/hwpxpb/releases) 에서 `HwpxEditor-native.zip`(C++ 판) 또는 `HwpxEditorOcx.zip`(.NET 판)을 받아 풀고,
+**관리자 권한**으로 `register.bat` 을 실행합니다. 이 zip 은 GitHub Actions(`ocx` 작업)가 Windows 에서 빌드합니다.
+
+직접 빌드할 때:
 1. 에디터 화면 `pb/dist` 는 저장소에 들어 있습니다. 에디터를 고쳤을 때만 `scripts/build-pb-web.sh` 로 다시 만듭니다 (Linux/WSL/macOS)
-2. OCX 빌드 (Windows, Visual Studio 2022 또는 .NET SDK): `dotnet build pb/ocx -c Release`
-   → `pb/ocx/bin/Release/net48/` 에 `HwpxEditorOcx.dll`, `Microsoft.Web.WebView2.*.dll`, `web\` 가 생깁니다.
-3. 각 PC에 위 폴더를 복사하고 **관리자 권한**으로 `register.bat` 실행 (32비트 regasm 사용)
-   - **.NET Framework 4.8** 이 필요합니다. 없으면 `register.bat` 이 알려 줍니다. regasm 이 `AsyncStateMachineAttribute 형식을 로드할 수 없습니다` 로 실패하는 것도 4.8 이 없어서입니다 ([4.8 Runtime 설치](https://dotnet.microsoft.com/download/dotnet-framework/net48) 후 재부팅).
+2. C++ 판: Visual Studio 2022 (C++ 데스크톱 + ATL 구성 요소)
+   ```
+   cd pb\ocx-native
+   nuget install Microsoft.Web.WebView2 -Version 1.0.4078.44 -OutputDirectory packages
+   msbuild HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32
+   ```
+   → `bin\HwpxEditor.ocx`. 같은 폴더에 `pb/dist` 를 `web\` 로 복사해 둡니다.
+3. .NET 판: `dotnet build pb/ocx -c Release` → `pb/ocx/bin/Release/net48/` 에 `HwpxEditorOcx.dll`, `Microsoft.Web.WebView2.*.dll`, `web\`
+   - **.NET Framework 4.8** 이 필요합니다. 없으면 `register.bat` 이 알려 줍니다. regasm 이 `AsyncStateMachineAttribute 형식을 로드할 수 없습니다` 로 실패하는 것도 4.8 이 없어서입니다. 4.8 을 깔 수 없으면 C++ 판을 쓰세요.
    - 경고 `RA0000` (/codebase, 서명되지 않은 어셈블리) 은 무시해도 됩니다.
 4. WebView2 런타임: Windows 10/11 은 대부분 기본 설치. 없으면 Microsoft "Evergreen Bootstrapper" 로 설치.
 
 ### Windows 7
-- Windows 7 **SP1** 이 필요합니다. .NET Framework 4.8 은 Windows 7 SP1 에 설치됩니다.
+- Windows 7 **SP1** 이 필요합니다. C++ 판은 .NET 이 필요 없고, .NET 판을 쓰려면 4.8 을 설치합니다 (Windows 7 SP1 에 설치됨).
 - WebView2 런타임은 Windows 7 에서 **109** 가 마지막 버전입니다. 에디터 화면은 109 에서 쓰는 기능만 씁니다 (배포본의 JS 를 검사함, 실제 Win7 시험은 아직 안 함).
 - 런타임을 PC 마다 설치하지 않으려면 109 **고정 버전(Fixed Version) x86** 런타임을 설치 폴더의 `webview2\` 에 풀어 둡니다. OCX 는 `webview2\msedgewebview2.exe` 가 있으면 그것을 씁니다.
 

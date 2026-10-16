@@ -8,7 +8,7 @@ HWPX(한글) 양식의 **누름틀·체크박스·라디오·드롭다운 값만
 | 엔진 (브라우저) | `engine/` | 값 대입/추출. 에디터 화면(PB·브라우저) 안에서 도는 JavaScript |
 | Unix 서버 (Python) | `server/`, `Dockerfile` | 브라우저 없이 HTTP API·명령행으로 HWPX/PDF 생성, 에디터 화면 제공. 표준 라이브러리만 사용 → [서버 가이드](docs/server-guide.md) |
 | 웹 에디터 | `pb/web/` (소스), `pb/dist/` (빌드 결과) | 서버 주소로 접속해 PC 의 HWPX 를 열고 편집·저장·인쇄 (PB 안에서도 같은 화면) |
-| PB 연동 | `pb/` | PowerBuilder 12.1 창 안에 에디터를 넣는 WebView2 OCX, 인쇄 포함, 서버 불필요 → [PB 가이드](docs/pb-guide.md) |
+| PB 연동 | `pb/` | PowerBuilder 12.1 창 안에 에디터를 넣는 WebView2 OCX (C++ 판은 .NET 불필요, .NET 4.8 판도 있음), 인쇄 포함, 서버 불필요 → [PB 가이드](docs/pb-guide.md) |
 
 에디터 화면과 PDF 변환은 오픈소스 [rhwp](https://github.com/edwardkim/rhwp) (MIT, v0.8.7 고정)를 씁니다.
 
