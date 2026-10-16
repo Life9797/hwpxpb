@@ -12,6 +12,9 @@
     #toolbar button, #toolbar select { font: inherit; padding: 4px 10px; border: 1px solid #b8bec7; border-radius: 4px; background: #fff; cursor: pointer; }
     #toolbar button:disabled { opacity: .5; cursor: default; }
     #toolbar .sep { width: 1px; align-self: stretch; background: #d0d4da; margin: 0 4px; }
+    #toolbar select[hidden] { display: none; }
+    #toolbar #role { color: #555; font-size: 13px; padding: 2px 8px; border-radius: 10px; background: #e8eaee; }
+    #toolbar #role:empty { display: none; }
     #toolbar #doc-name { color: #555; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
     #toolbar #message { margin-left: auto; color: #b42318; }
     #editor { flex: 1; min-height: 0; width: 100%; }
@@ -41,10 +44,12 @@
   <div id="toolbar">
     <button id="btn-open" disabled>열기</button>
     <input id="file-input" type="file" accept=".hwpx" hidden />
-    <select id="sel-mode" disabled title="화면 모드">
-      <option value="form">양식 입력</option>
-      <option value="edit">자유 편집</option>
+    <!-- 편집 권한이 있을 때만 보인다. 권한이 없으면 작성(양식 입력)만 -->
+    <select id="sel-mode" disabled hidden title="작성: 칸·선택 개체만 입력 / 편집: 문서 전체를 고침">
+      <option value="form">작성 (양식 입력)</option>
+      <option value="edit">편집 (문서 전체)</option>
     </select>
+    <span id="role" title="편집 권한은 관리자가 서버에 설정합니다"></span>
     <span class="sep"></span>
     <button id="btn-save" disabled title="연 파일에 그대로 저장 (Ctrl+S)">저장</button>
     <button id="btn-save-as" disabled>다른 이름으로 저장</button>

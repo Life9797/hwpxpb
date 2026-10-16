@@ -8,8 +8,11 @@
 // 주소로 문서를 바로 열 수도 있다 (서버 주소로 접속하면 이 화면이 뜬다).
 //   http://서버:8080/?template=rx01      서버에 등록된 양식 (/api/templates/rx01)
 //   index.html?src=<HWPX 주소>           임의 주소의 HWPX
-//   &mode=edit                          자유 편집으로 열기 (기본: 양식 입력)
-//   &key=<API 키>                       서버에 API_KEY 를 설정했을 때
+//   &mode=edit                          편집(문서 전체)으로 열기. 편집 권한이 있을 때만 (기본: 작성)
+//   &key=<API 키>                       서버에 API_KEY 를 설정했을 때. 편집 권한도 이 키로 정한다
+//
+// 편집 권한은 서버의 /api/permission 이 정한다 (EDIT_KEYS, EDIT_USERS). 권한이 없거나 서버 없이
+// 열었으면 작성만 할 수 있고, 저장하는 파일도 "원본 양식 + 입력값" 이다.
 //   &comboSep=|                         드롭다운 코드 구분자 (기본 ":")
 import { DEFAULT_KEYS, eventKey } from './bridge.js';
 
@@ -141,8 +144,25 @@ if (!window.chrome?.webview) {
     }),
   );
 
+  const apiHeaders = () => (params.get('key') ? { 'X-API-Key': params.get('key') } : {});
+
+  /** 서버에 편집 권한을 묻는다. 서버가 없거나 답하지 않으면 작성만 */
+  async function loadPermission() {
+    let canEdit = false;
+    try {
+      const res = await fetch(new URL('/api/permission', location.href), { headers: apiHeaders() });
+      if (res.ok) canEdit = (await res.json()).canEdit === true;
+    } catch {}
+    await call('setPermission', canEdit);
+    $('sel-mode').hidden = !canEdit;
+    $('sel-mode').value = 'form';
+    $('role').textContent = canEdit ? '' : '작성 전용';
+    return canEdit;
+  }
+
   async function ready() {
     while (!window.hwpBridgeReady) await new Promise((r) => setTimeout(r, 50));
+    await loadPermission();
     try {
       await call('setKeys', JSON.stringify(loadKeys()));
     } catch {
@@ -199,16 +219,17 @@ if (!window.chrome?.webview) {
   window.addEventListener('keydown', onKey, true);
 
   await ready();
-  if (params.get('mode')) $('sel-mode').value = params.get('mode');
+  const deniedEdit = params.get('mode') === 'edit' && $('sel-mode').hidden;
+  if (params.get('mode') && !deniedEdit) $('sel-mode').value = params.get('mode');
   const template = params.get('template');
   const src = template ? new URL(`/api/templates/${encodeURIComponent(template)}`, location.href).href : params.get('src');
   if (src) {
     await busy(async () => {
-      const headers = params.get('key') ? { 'X-API-Key': params.get('key') } : {};
-      const res = await fetch(src, { headers });
+      const res = await fetch(src, { headers: apiHeaders() });
       if (!res.ok) throw new Error(`문서를 불러오지 못했습니다 (${res.status})`);
       const name = template ? `${template}.hwpx` : decodeURIComponent(new URL(src, location.href).pathname.split('/').pop() || 'document.hwpx');
       await openBytes(new Uint8Array(await res.arrayBuffer()), name);
     });
   }
+  if (deniedEdit && !$('message').textContent) say('편집 권한이 없어 작성으로 열었습니다');
 }

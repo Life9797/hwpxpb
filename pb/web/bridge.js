@@ -6,6 +6,9 @@
 //
 // 양식 모드(form)에서는 문서를 저장·추출할 때 "원본 양식 + 추출한 값" 으로 다시 만든다.
 // 그래서 에디터가 문서를 다시 쓰더라도 결과 파일의 서식은 원본 양식 그대로다.
+//
+// 권한: 편집 권한(setPermission(true))이 있어야 자유 편집(edit)으로 바꿀 수 있다. 기본은 권한 없음.
+// 권한이 없으면 어떤 모드에서든 결과 문서는 "원본 양식 + 값" 이라 본문을 고쳐도 반영되지 않는다.
 import { createStudio } from './vendor/rhwp-editor/index.js';
 import { HwpxDocument } from './vendor/engine/index.js';
 
@@ -16,7 +19,17 @@ const state = {
   template: null, // 원본 양식 바이트 (Uint8Array)
   fileName: 'document.hwpx',
   mode: 'form', // form | edit | view
+  allowEdit: false, // 문서 전체 편집 권한 (PB 는 OCX AllowEdit, 브라우저는 서버 /api/permission)
 };
+
+const MODES = ['form', 'edit', 'view'];
+function checkMode(mode) {
+  if (!MODES.includes(mode)) throw new Error(`모드는 ${MODES.join(', ')} 중 하나입니다: ${mode}`);
+  if (mode === 'edit' && !state.allowEdit) throw new Error('편집 권한이 없습니다 (작성만 할 수 있습니다)');
+  return mode;
+}
+/** 원본 양식에 값만 다시 넣어 결과를 만드는지 (자유 편집 결과를 쓰지 않음) */
+const rebuildFromTemplate = () => Boolean(state.template) && (state.mode === 'form' || !state.allowEdit);
 
 // ---- 양식 모드의 이동 키 -------------------------------------------------------
 // nextObject/prevObject: 선택 개체(체크박스·라디오·드롭다운) 사이 이동. 고른 개체는 Space/Enter 로 체크·선택
@@ -133,7 +146,7 @@ async function readValues(comboSep) {
 
 /** 결과 문서: 양식 모드면 원본 양식에 값만 다시 넣고, 편집 모드면 에디터가 쓴 그대로 */
 async function buildDocument(comboSep) {
-  if (state.mode !== 'form' || !state.template) return currentBytes();
+  if (!rebuildFromTemplate()) return currentBytes();
   const { values } = await readValues(comboSep);
   const doc = new HwpxDocument(state.template);
   doc.fill(values, { comboSep });
@@ -166,6 +179,7 @@ async function renderPrintPages(comboSep) {
 const api = {
   /** 문서 열기. b64 = HWPX 파일 내용, mode = form | edit | view */
   async open(b64, fileName = 'document.hwpx', mode = 'form') {
+    checkMode(mode);
     state.template = fromB64(b64);
     state.fileName = fileName;
     state.mode = mode;
@@ -177,10 +191,22 @@ const api = {
   },
 
   async setMode(mode) {
-    state.mode = mode;
+    state.mode = checkMode(mode);
     await setFormMode(mode === 'form');
     await state.studio.chrome.set({ menu: mode === 'edit', toolbar: mode === 'edit' });
     return { ok: true };
+  },
+
+  /** 문서 전체 편집 권한을 준다(true)/뺀다(false). 빼면 자유 편집 중이던 화면은 작성(form)으로 돌아간다 */
+  async setPermission(canEdit) {
+    state.allowEdit = canEdit === true || canEdit === 'true' || canEdit === '1';
+    if (!state.allowEdit && state.mode === 'edit' && state.studio) await api.setMode('form');
+    emit('permission', { canEdit: state.allowEdit });
+    return { ok: true, canEdit: state.allowEdit, mode: state.mode };
+  },
+
+  async getPermission() {
+    return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
   /** 개체 목록과 테이블명 */
@@ -192,9 +218,9 @@ const api = {
   /** 값 대입. values = {컬럼: 값}. 결과 {applied, unknown, rejected} */
   async setFields(values, comboSep = ':') {
     if (typeof values === 'string') values = JSON.parse(values || '{}');
-    const base = state.mode === 'form' && state.template ? state.template : await currentBytes();
+    const base = rebuildFromTemplate() ? state.template : await currentBytes();
     const doc = new HwpxDocument(base);
-    if (state.mode === 'form' && state.template) {
+    if (rebuildFromTemplate()) {
       // 화면에서 이미 입력한 값은 살리고, 새 값만 덮어쓴다
       const shown = await readValues(comboSep);
       doc.fill(shown.values, { comboSep });

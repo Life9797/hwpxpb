@@ -7,6 +7,9 @@ services:
     environment:
       # 비워 두면 인증 없이 동작. 운영에서는 반드시 설정
       API_KEY: ${API_KEY:-}
+      EDIT_KEYS: ${EDIT_KEYS:-}
+      EDIT_USERS: ${EDIT_USERS:-}
+      AUTH_USER_HEADER: ${AUTH_USER_HEADER:-}
     volumes:
       - hwpxpb-data:/data
     restart: unless-stopped

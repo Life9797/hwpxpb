@@ -71,6 +71,9 @@ def serve(opt: dict) -> int:
         web_dir=web_dir or None,
         api_key=os.environ.get("API_KEY", ""),
         pdf=pdf_opts(),
+        edit_keys=[k.strip() for k in os.environ.get("EDIT_KEYS", "").split(",")],
+        edit_users=[u.strip() for u in os.environ.get("EDIT_USERS", "").split(",")],
+        user_header=os.environ.get("AUTH_USER_HEADER", ""),
     )
     port = opt.get("port") or int(os.environ.get("PORT") or 8080)
     server = create_server(app, opt.get("host") or "0.0.0.0", port)

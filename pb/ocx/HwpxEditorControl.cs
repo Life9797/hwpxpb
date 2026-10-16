@@ -39,6 +39,8 @@ namespace Hwpxpb
         [DispId(12)] int TimeoutSeconds { get; set; }
         [DispId(13)] string WebFolder { get; set; }
         [DispId(14)] bool PdfLandscape { get; set; }
+        // 문서 전체 편집 권한. false(기본)면 작성(form)·보기(view)만 되고 Open/SetMode 의 "edit" 는 실패한다
+        [DispId(15)] bool AllowEdit { get; set; }
         // PB 12.1 에는 JSON 파서가 없으므로 JSON 없이 쓰는 메서드
         [DispId(20)] string GetFieldValue(string column, string comboSep);
         [DispId(21)] bool SetFieldValue(string column, string value, string comboSep);
@@ -94,6 +96,17 @@ namespace Hwpxpb
         public string LastError => _lastError;
         public bool IsReady => _ready;
 
+        private bool _allowEdit;
+        public bool AllowEdit
+        {
+            get => _allowEdit;
+            set
+            {
+                _allowEdit = value;
+                if (_ready) Call("setPermission", value ? "true" : "false");
+            }
+        }
+
         public HwpxEditorControl()
         {
             Controls.Add(_web);
@@ -145,6 +158,8 @@ namespace Hwpxpb
             switch (msg.TryGetValue("event", out var ev) ? ev as string : null)
             {
                 case "ready":
+                    // 권한을 먼저 넘긴 뒤 PB 에 Ready 를 알린다 (결과는 기다리지 않는다)
+                    _web.CoreWebView2.ExecuteScriptAsync("window.hwpBridge.setPermission(" + (_allowEdit ? "true" : "false") + ")");
                     _ready = true;
                     Ready?.Invoke();
                     break;

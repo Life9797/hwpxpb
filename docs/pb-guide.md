@@ -35,7 +35,8 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 
 | 메서드 | 설명 |
 |---|---|
-| `Open(path, mode)` | 파일 열기. mode = `form`(값만 입력, 기본) / `edit`(자유 편집) / `view` |
+| `Open(path, mode)` | 파일 열기. mode = `form`(작성: 값만 입력, 기본) / `edit`(편집: 문서 전체, **AllowEdit 필요**) / `view` |
+| `AllowEdit` (속성) | 문서 전체 편집 권한. 기본 `false` = 작성만. PB 의 사용자 권한에 따라 `true` 로 둠 (아래 "편집 권한") |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |
 | `GetFieldValue(column, comboSep)` | 값 하나 읽기 |
@@ -52,12 +53,27 @@ PB 12.1 창 ── OLE 컨트롤 "Hwpxpb.Editor" (pb/ocx, 32비트 ActiveX)
 | `GetDefaultPrinter()` | 기본 프린터 이름 |
 | `SetKeys(nextObject, prevObject, nextField, prevField)` | 양식 입력에서 옮겨 다닐 키. `""` 는 그대로, `"none"` 은 끔 (아래 8절) |
 | `MoveObject(delta)` | 다음(1)/이전(-1) 선택 개체로 이동. 버튼 등에서 부를 때 |
-| `SetMode(mode)` | 모드 바꾸기 |
+| `SetMode(mode)` | 모드 바꾸기 (`edit` 는 AllowEdit 가 true 일 때만) |
 | `LastError` | 마지막 오류 메시지 |
 | `IsReady` | 에디터 준비 여부 (`ready` 이벤트 이후 true) |
 
 `comboSep` 은 드롭다운 항목의 코드 구분자입니다. 빈 문자열이면 `:` 를 씁니다.
 항목이 `01:서울` 이면 값은 `01`, 넣을 때도 `01` 만 주면 됩니다.
+
+### 편집 권한 (작성 / 편집)
+- **작성**(`form`): 누름틀·체크박스·라디오·드롭다운 값만 넣습니다. 저장 파일은 항상 "원본 양식 + 입력값" 이라 본문·서식은 바뀌지 않습니다.
+- **편집**(`edit`): 문서 전체(본문, 표, 서식)를 고칩니다. 메뉴와 도구 상자가 보입니다.
+- `AllowEdit` 가 `false`(기본)면 `Open(..., "edit")`, `SetMode("edit")` 는 false 를 돌려주고 `LastError` 에 "편집 권한이 없습니다" 가 들어갑니다. 이때는 어떤 모드든 저장 결과가 "원본 양식 + 입력값" 입니다.
+- 편집 중에 `AllowEdit = false` 로 바꾸면 작성으로 돌아갑니다.
+
+```powerscript
+// 사용자 권한에 따라 (권한 확인은 PB 앱의 사용자 테이블 등에서)
+ole_hwp.object.AllowEdit = (gs_user_role = "ADMIN")
+// 권한이 있으면 작성/편집을 고르게: ddlb_mode 에 "작성"(form), "편집"(edit)
+ddlb_mode.Visible = ole_hwp.object.AllowEdit
+...
+ole_hwp.object.SetMode("edit")    // 권한이 없으면 false
+```
 
 ## 5. 값 규칙 (양식 만들 때)
 - 테이블명: [파일 > 문서 정보] 키워드 또는 설명에 `dbtable=TB_PRESCRIPTION`

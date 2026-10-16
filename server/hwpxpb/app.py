@@ -9,6 +9,7 @@
   POST /api/extract?comboSep=:            본문 HWPX 에서 값 추출
   POST /api/schema                        본문 HWPX 의 개체 목록
   POST /api/pdf                           본문 HWPX → PDF
+  GET  /api/permission                    이 사용자가 문서 전체를 편집할 수 있는지 {canEdit}
   GET  /                                  웹 에디터 (web_dir 이 있을 때. 열기·저장·인쇄)
   GET  /?template=rx01                    등록된 양식을 에디터로 열기
 """
@@ -65,6 +66,9 @@ class App:
         max_body_bytes: int = 50 * 1024 * 1024,
         pdf: dict | None = None,
         log_requests: bool = True,
+        edit_keys: list[str] | None = None,
+        edit_users: list[str] | None = None,
+        user_header: str = "",
     ):
         self.template_dir = Path(template_dir)
         self.web_dir = Path(web_dir).resolve() if web_dir else None
@@ -72,6 +76,20 @@ class App:
         self.max_body_bytes = max_body_bytes
         self.pdf = pdf or {}
         self.log_requests = log_requests
+        # 편집 권한: X-API-Key 가 edit_keys 중 하나이거나, 앞단 인증 프록시가 넣은 사용자 헤더가 edit_users 중 하나.
+        # "*" 는 모두 허용. 아무것도 정하지 않으면 아무도 편집할 수 없다(작성만).
+        self.edit_keys = [k for k in (edit_keys or []) if k]
+        self.edit_users = [u for u in (edit_users or []) if u]
+        self.user_header = user_header
+
+    def can_edit(self, headers) -> bool:
+        if "*" in self.edit_keys or "*" in self.edit_users:
+            return True
+        key = headers.get("X-API-Key") or ""
+        if key and key in self.edit_keys:
+            return True
+        user = headers.get(self.user_header) if self.user_header else None
+        return bool(user) and user in self.edit_users
 
     # ---- 템플릿 ----
     def template_path(self, tid: str) -> Path:
@@ -109,6 +127,10 @@ class App:
 
         if path == "/health":
             return req.send_json(200, {"ok": True})
+        if path == "/api/permission" and method == "GET":
+            # API 키가 없어도 묻는다 (없으면 작성만)
+            user = req.headers.get(self.user_header) if self.user_header else None
+            return req.send_json(200, {"canEdit": self.can_edit(req.headers), "user": user or None})
         # 웹 에디터 화면은 인증 없이 연다 (화면 파일만. 양식·API 는 아래에서 키 확인)
         if self.web_dir and method in ("GET", "HEAD") and not path.startswith("/api/"):
             return self.send_static(req, path)

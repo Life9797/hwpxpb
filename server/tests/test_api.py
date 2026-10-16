@@ -35,6 +35,9 @@ class ApiTest(unittest.TestCase):
             api_key="k",
             pdf={"rhwp_bin": os.environ.get("RHWP_BIN") or str(fake)},
             log_requests=False,
+            edit_keys=["boss"],
+            edit_users=["kim"],
+            user_header="X-Remote-User",
         )
         cls.server = create_server(app, "127.0.0.1", 0)
         cls.port = cls.server.server_address[1]
@@ -128,6 +131,22 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(r.status, 404, bad)
         r, _ = self.call("GET", "/api/templates", key=False)  # API 는 여전히 키 필요
         self.assertEqual(r.status, 401)
+
+    def test_permission(self):
+        def can(headers=None, key=False):
+            r, data = self.call("GET", "/api/permission", headers=headers, key=key)
+            self.assertEqual(r.status, 200)
+            return json.loads(data)["canEdit"]
+
+        self.assertFalse(can())  # 키 없음 → 작성만
+        self.assertFalse(can(key=True))  # API 키만으로는 편집 불가
+        self.assertTrue(can({"X-API-Key": "boss"}))
+        self.assertTrue(can({"X-Remote-User": "kim"}))
+        self.assertFalse(can({"X-Remote-User": "lee"}))
+
+    def test_permission_default_and_star(self):
+        self.assertFalse(App(template_dir=".").can_edit({}))
+        self.assertTrue(App(template_dir=".", edit_keys=["*"]).can_edit({}))
 
 
 if __name__ == "__main__":
