@@ -1,4 +1,4 @@
-HwpxEditorOcx - PowerBuilder 12.1 용 HWPX 에디터 OLE 컨트롤 (빌드된 배포본)
+﻿HwpxEditorOcx - PowerBuilder 12.1 용 HWPX 에디터 OLE 컨트롤 (빌드된 배포본)
 
 빌드 없이 이 zip 만으로 설치합니다.
 

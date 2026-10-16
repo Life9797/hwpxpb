@@ -1,6 +1,8 @@
 name: ocx
-# PB 12.1 용 OCX 를 Windows 에서 빌드하고, 바로 쓸 수 있는 zip 을 만든다.
-# ocx-v* 태그를 올리거나, 수동 실행 때 release 에 태그 이름을 주면 그 zip 을 GitHub Release 에 첨부한다.
+# PB 12.1 용 OCX 두 가지를 Windows 에서 빌드하고, 바로 쓸 수 있는 zip 을 만든다.
+#   HwpxEditor-native.zip   C++ 판. .NET 불필요 (Windows 7 SP1 + .NET 4.0 PC 도 됨)
+#   HwpxEditorOcx.zip       .NET Framework 4.8 판
+# ocx-v* 태그를 올리거나, 수동 실행 때 release 에 태그 이름을 주면 두 zip 을 GitHub Release 에 첨부한다.
 on:
   pull_request:
     paths: ["pb/**", ".github/workflows/ocx.yml"]
@@ -15,7 +17,32 @@ on:
 permissions:
   contents: write
 jobs:
-  build:
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: WebView2 SDK 받기
+        run: nuget install Microsoft.Web.WebView2 -Version 1.0.4078.44 -OutputDirectory pb/ocx-native/packages
+      - name: OCX 빌드 (C++/ATL, Win32)
+        run: msbuild pb/ocx-native/HwpxEditor.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /nologo /v:minimal
+      - name: zip 만들기
+        shell: pwsh
+        run: |
+          $d = "out/HwpxEditor-native"
+          New-Item -ItemType Directory $d | Out-Null
+          Copy-Item pb/ocx-native/bin/HwpxEditor.ocx, pb/ocx-native/register.bat, pb/ocx-native/unregister.bat, LICENSE $d
+          Copy-Item pb/ocx-native/README-설치.txt "$d/README.txt"
+          Copy-Item pb/dist "$d/web" -Recurse
+          if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
+          Get-ChildItem $d | Format-Table Name, Length
+          Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditor-native.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HwpxEditor-native
+          path: out/HwpxEditor-native.zip
+
+  dotnet:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +66,27 @@ jobs:
         with:
           name: HwpxEditorOcx
           path: out/HwpxEditorOcx.zip
+
+  release:
+    needs: [native, dotnet]
+    if: startsWith(github.ref, 'refs/tags/ocx-v') || inputs.release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
       - name: Release 에 첨부
-        if: startsWith(github.ref, 'refs/tags/ocx-v') || inputs.release != ''
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release || github.ref_name }}
-        run: gh release create "$env:TAG" out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "OCX $env:TAG" --notes-file pb/ocx/README-설치.txt
+        run: |
+          cat > notes.md <<'NOTES'
+          - **HwpxEditor-native.zip**: C++ 판. .NET 이 필요 없습니다 (Windows 7 SP1, .NET 4.0 PC 포함). 압축을 풀고 관리자 권한으로 register.bat.
+          - **HwpxEditorOcx.zip**: .NET Framework 4.8 판.
+
+          두 판은 ProgID(Hwpxpb.Editor)·메서드·이벤트가 같아 PB 코드는 그대로 씁니다. 한 PC 에는 하나만 등록하세요.
+          설치 안내는 각 zip 의 README.txt 에 있습니다.
+          NOTES
+          gh release create "$TAG" out/HwpxEditor-native.zip out/HwpxEditorOcx.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --prerelease --title "OCX $TAG" --notes-file notes.md

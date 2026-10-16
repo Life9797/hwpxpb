@@ -1,0 +1,32 @@
+HKCR
+{
+	Hwpxpb.Editor.1 = s 'HwpxEditorControl'
+	{
+		CLSID = s '{6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03}'
+	}
+	Hwpxpb.Editor = s 'HwpxEditorControl'
+	{
+		CLSID = s '{6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03}'
+		CurVer = s 'Hwpxpb.Editor.1'
+	}
+	NoRemove CLSID
+	{
+		ForceRemove {6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03} = s 'HwpxEditorControl'
+		{
+			ProgID = s 'Hwpxpb.Editor.1'
+			VersionIndependentProgID = s 'Hwpxpb.Editor'
+			ForceRemove Programmable
+			InprocServer32 = s '%MODULE%'
+			{
+				val ThreadingModel = s 'Apartment'
+			}
+			ForceRemove Control
+			MiscStatus = s '0'
+			{
+				'1' = s '%OLEMISC%'
+			}
+			TypeLib = s '{6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A00}'
+			Version = s '1.0'
+		}
+	}
+}
