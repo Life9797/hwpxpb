@@ -18,7 +18,8 @@ permissions:
   contents: write
 jobs:
   native:
-    runs-on: windows-latest
+    # v143(VS 2022) 도구로 빌드한다 (Windows 7 대상). windows-latest 는 VS 2026 이라 v143 용 ATL 이 없다
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
