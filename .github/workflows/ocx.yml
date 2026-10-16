@@ -70,15 +70,22 @@ jobs:
         shell: pwsh
         run: |
           # 최신 런타임 설치기는 Windows 7 에서 실행되지 않는다. 109 는 Windows 7 을 지원하는 마지막 버전.
-          $url = "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/671744ba-8b1f-42e2-878c-d7ae8ee081c4/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.69.x86.cab"
-          Invoke-WebRequest $url -OutFile wv2.cab
-          $sig = Get-AuthenticodeSignature wv2.cab
-          Write-Output "::notice::cab 서명 $($sig.Status) $($sig.SignerCertificate.Subject)"
-          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Microsoft') { throw "cab 서명 확인 실패" }
+          # 1) Microsoft CDN 의 109 고정 버전 cab, 2) 안 되면 NuGet 의 WebView2.Runtime.X86 109 패키지 (내용은 Microsoft 서명 파일)
           New-Item -ItemType Directory wv2 | Out-Null
-          expand.exe wv2.cab -F:* wv2 | Out-Null
+          try {
+            Invoke-WebRequest "https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/671744ba-8b1f-42e2-878c-d7ae8ee081c4/Microsoft.WebView2.FixedVersionRuntime.109.0.1518.69.x86.cab" -OutFile wv2.cab
+            expand.exe wv2.cab -F:* wv2 | Out-Null
+            Write-Output "::notice::Microsoft CDN cab 사용"
+          } catch {
+            Write-Output "::notice::CDN 실패($($_.Exception.Message)), NuGet 사용"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/webview2.runtime.x86/109.0.1518.78/webview2.runtime.x86.109.0.1518.78.nupkg" -OutFile wv2.zip
+            Expand-Archive wv2.zip wv2
+          }
           $exe = Get-ChildItem wv2 -Recurse -Filter msedgewebview2.exe | Select-Object -First 1
-          if (!$exe) { throw "msedgewebview2.exe 없음" }
+          if (!$exe) { Write-Output "::error::msedgewebview2.exe 없음"; exit 1 }
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Output "::notice::서명 $($sig.Status) $($sig.SignerCertificate.Subject) / $($exe.VersionInfo.ProductVersion)"
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { Write-Output "::error::서명 확인 실패"; exit 1 }
           $d = "out/HwpxEditor-native"
           Move-Item $exe.Directory.FullName "$d/webview2"
           Write-Output "::notice::webview2 $((Get-Item "$d/webview2/msedgewebview2.exe").VersionInfo.ProductVersion)"
