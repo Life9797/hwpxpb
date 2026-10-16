@@ -72,6 +72,8 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `SetMode(mode)` | 모드 바꾸기 (`edit` 는 AllowEdit 가 true 일 때만) |
 | `LastError` | 마지막 오류 메시지 |
 | `IsReady` | 에디터 준비 여부 (`ready` 이벤트 이후 true) |
+| `Status` | (C++ 판) 지금 단계. `IsReady` 가 계속 false 일 때 어디서 멈췄는지 보여 줌 (런타임 없음, web 폴더 없음, 화면 오류 등) |
+| `BrowserVersion` | (C++ 판) 쓰는 WebView2 런타임 버전 |
 
 `comboSep` 은 드롭다운 항목의 코드 구분자입니다. 빈 문자열이면 `:` 를 씁니다.
 항목이 `01:서울` 이면 값은 `01`, 넣을 때도 `01` 만 주면 됩니다.

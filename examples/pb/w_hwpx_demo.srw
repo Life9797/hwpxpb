@@ -61,6 +61,7 @@ type variables
 // 창에 놓은 OLE 컨트롤 (Insert > OLE > Insert Control > HwpxEditorControl). 이름은 아무것이나 된다
 OLECustomControl iole
 boolean ib_ready
+long il_wait        // 준비를 기다린 횟수 (timer 0.3 초마다)
 string is_file      // 열 파일. OpenWithParm 인수나 실행 인수(CommandParm)로 받는다
 string is_sep = ""  // 드롭다운 코드 구분자. "" 이면 ":" ("01:서울" → 값 01)
 end variables
@@ -374,6 +375,7 @@ end event
 
 event timer;// OCX 가 준비됐는지 본다 (ready 이벤트 대신. 컨트롤에 스크립트를 넣지 않아도 되게)
 boolean lb_ready
+string ls_status
 
 If Not IsValid(iole) Then
 	Timer(0)
@@ -381,12 +383,21 @@ If Not IsValid(iole) Then
 End If
 Try
 	lb_ready = iole.object.IsReady
+	ls_status = String(iole.object.Status)   // 어디까지 진행됐는지 (C++ 판 0.2.2 이상)
 Catch (RuntimeError re)
 	lb_ready = False
+	ls_status = re.GetMessage()
 End Try
 If lb_ready Then
 	Timer(0)
 	Post Event ue_ready()
+	Return
+End If
+il_wait++
+st_status.Text = "에디터 준비 중... " + ls_status
+If il_wait = 200 Then  // 약 60초
+	Timer(0)
+	MessageBox("에디터가 준비되지 않았습니다", ls_status + "~r~n~r~n" + String(iole.object.LastError))
 End If
 end event
 

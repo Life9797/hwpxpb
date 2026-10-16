@@ -369,6 +369,10 @@ public:
 
 	STDMETHOD(get_LastError)(BSTR* value) { return Ret(value, m_lastError); }
 	STDMETHOD(get_IsReady)(VARIANT_BOOL* value) { return Ret(value, m_ready); }
+	/** 지금 단계 (준비가 안 될 때 어디서 멈췄는지 보는 용도) */
+	STDMETHOD(get_Status)(BSTR* value) { return Ret(value, m_status); }
+	/** 쓰는 WebView2 런타임 버전 */
+	STDMETHOD(get_BrowserVersion)(BSTR* value) { return Ret(value, m_browserVersion); }
 	STDMETHOD(get_TimeoutSeconds)(long* value) {
 		if (!value) return E_POINTER;
 		*value = m_timeout;
@@ -533,6 +537,8 @@ private:
 	bool m_ready = false;
 	bool m_closed = false;
 	std::wstring m_lastError;
+	std::wstring m_status = L"컨트롤 창이 아직 만들어지지 않았습니다 (PB 가 컨트롤을 활성화하기 전)";
+	std::wstring m_browserVersion;
 	long m_timeout = 60;
 	std::wstring m_webFolder;
 	bool m_landscape = false;
@@ -555,6 +561,7 @@ private:
 
 	bool Fail(const std::wstring& message) {
 		m_lastError = message;
+		if (!m_ready) m_status = L"오류: " + message;
 		QueueEvent(3, message);
 		return false;
 	}
@@ -634,6 +641,18 @@ private:
 		std::wstring dataDir = LocalAppData() + L"\\hwpxpb\\WebView2";
 		CComPtr<IUnknown> keep(GetUnknown());
 
+		LPWSTR version = nullptr;
+		HRESULT hv = GetAvailableCoreWebView2BrowserVersionString(useFixed ? fixed.c_str() : nullptr, &version);
+		if (FAILED(hv) || !version) {
+			Fail(useFixed ? L"webview2 폴더의 런타임을 쓸 수 없습니다: " + fixed + HrText(hv)
+			              : L"WebView2 런타임이 설치되어 있지 않습니다 (Windows 7 은 109 버전 설치 또는 webview2 폴더에 고정 버전)" + HrText(hv));
+			if (version) CoTaskMemFree(version);
+			return;
+		}
+		m_browserVersion = version;
+		CoTaskMemFree(version);
+		m_status = L"WebView2 시작 중 (런타임 " + m_browserVersion + (useFixed ? L", 고정 버전)" : L")");
+
 		HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixed.c_str() : nullptr, dataDir.c_str(), nullptr,
 			Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
 				[this, keep](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
@@ -643,6 +662,7 @@ private:
 						return S_OK;
 					}
 					m_env = env;
+					m_status = L"WebView2 화면 만드는 중";
 					HRESULT hr2 = env->CreateCoreWebView2Controller(m_hWnd,
 						Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
 							[this, keep](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
@@ -680,6 +700,10 @@ private:
 			return;
 		}
 		std::wstring folder = m_webFolder.empty() ? ModuleDir() + L"\\web" : m_webFolder;
+		if (!FileExists(folder + L"\\index.html")) {
+			Fail(L"에디터 화면 폴더가 없습니다: " + folder + L"\\index.html (zip 의 web 폴더를 OCX 옆에 두세요)");
+			return;
+		}
 		w3->SetVirtualHostNameToFolderMapping(kHost, folder.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
 		EventRegistrationToken token;
 		m_web->add_WebMessageReceived(
@@ -693,6 +717,28 @@ private:
 					return S_OK;
 				}).Get(),
 			&token);
+		// 화면 스크립트 오류를 PB 쪽에서 볼 수 있게 (Status / LastError)
+		m_web->AddScriptToExecuteOnDocumentCreated(
+			L"(function(){function s(m){try{window.chrome.webview.postMessage(JSON.stringify({event:'jserror',message:String(m)}));}catch(e){}}"
+			L"window.addEventListener('error',function(e){s((e.message||'error')+' @'+(e.filename||'')+':'+(e.lineno||0));});"
+			L"window.addEventListener('unhandledrejection',function(e){var r=e.reason;s('Promise: '+(r&&r.message||r));});})();",
+			nullptr);
+		m_web->add_NavigationCompleted(
+			Callback<ICoreWebView2NavigationCompletedEventHandler>(
+				[this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+					BOOL ok = FALSE;
+					args->get_IsSuccess(&ok);
+					if (ok) {
+						if (!m_ready) m_status = L"화면 열림, 에디터 시작 중";
+					} else {
+						COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+						args->get_WebErrorStatus(&st);
+						Fail(L"에디터 화면을 열지 못했습니다 (WebErrorStatus " + std::to_wstring(static_cast<int>(st)) + L")");
+					}
+					return S_OK;
+				}).Get(),
+			&token);
+		m_status = L"에디터 화면 여는 중: " + folder;
 		m_web->Navigate((std::wstring(L"https://") + kHost + L"/index.html").c_str());
 	}
 
@@ -716,7 +762,15 @@ private:
 			// 권한을 먼저 넘긴 뒤 PB 에 Ready 를 알린다
 			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setPermission(") + (m_allowEdit ? L"true" : L"false") + L")").c_str(), nullptr);
 			m_ready = true;
+			m_status = L"준비됨";
 			QueueEvent(1);
+		} else if (ev == L"jserror") {
+			std::wstring msg = L"화면 스크립트 오류: " + JsonString(m, L"message");
+			if (m_ready) {
+				m_lastError = msg;
+			} else {
+				Fail(msg);
+			}
 		} else if (ev == L"loaded") {
 			QueueEvent(2, JsonString(m, L"fileName"), JsonString(m, L"table"));
 		}
