@@ -53,6 +53,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 |---|---|
 | `Open(path, mode)` | 파일 열기. mode = `form`(작성: 값만 입력, 기본) / `edit`(편집: 문서 전체, **AllowEdit 필요**) / `view` |
 | `AllowEdit` (속성) | 문서 전체 편집 권한. 기본 `false` = 작성만. PB 의 사용자 권한에 따라 `true` 로 둠 (아래 "편집 권한") |
+| `ShowMenu` (속성) | 원래 에디터 메뉴·도구 모음 표시. 권한 없는 사용자에게는 항상 숨김. 권한자는 편집 모드에서 보이고, `true` 면 작성 모드에서도 보임. 기본 `false` |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |
 | `GetFieldValue(column, comboSep)` | 값 하나 읽기 |
@@ -83,6 +84,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 - **편집**(`edit`): 문서 전체(본문, 표, 서식)를 고칩니다. 메뉴와 도구 상자가 보입니다.
 - `AllowEdit` 가 `false`(기본)면 `Open(..., "edit")`, `SetMode("edit")` 는 false 를 돌려주고 `LastError` 에 "편집 권한이 없습니다" 가 들어갑니다. 이때는 어떤 모드든 저장 결과가 "원본 양식 + 입력값" 입니다.
 - 편집 중에 `AllowEdit = false` 로 바꾸면 작성으로 돌아갑니다.
+- 시작할 때는 에디터 화면을 숨겨 두었다가 메뉴 설정이 끝난 뒤 보여 주므로, 원래 메뉴가 잠깐 보였다 사라지지 않습니다.
 
 ```powerscript
 // 사용자 권한에 따라 (권한 확인은 PB 앱의 사용자 테이블 등에서)

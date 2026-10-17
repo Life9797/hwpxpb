@@ -20,7 +20,15 @@ const state = {
   fileName: 'document.hwpx',
   mode: 'form', // form | edit | view
   allowEdit: false, // 문서 전체 편집 권한 (PB 는 OCX AllowEdit, 브라우저는 서버 /api/permission)
+  showMenu: false, // 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지 (OCX ShowMenu)
 };
+
+/** 메뉴·도구 모음: 권한 없는 사용자는 항상 숨김. 권한자는 편집 모드에서, ShowMenu 면 작성 모드에서도 보인다 */
+async function applyChrome() {
+  if (!state.studio) return;
+  const on = state.allowEdit && (state.mode === 'edit' || (state.showMenu && state.mode === 'form'));
+  await state.studio.chrome.set({ menu: on, toolbar: on });
+}
 
 const MODES = ['form', 'edit', 'view'];
 function checkMode(mode) {
@@ -185,6 +193,7 @@ const api = {
     state.mode = mode;
     new HwpxDocument(state.template); // HWPX 인지 먼저 확인
     await load(state.template);
+    await applyChrome();
     const doc = new HwpxDocument(state.template);
     emit('loaded', { fileName, table: doc.dbTable });
     return { ok: true, table: doc.dbTable };
@@ -193,14 +202,22 @@ const api = {
   async setMode(mode) {
     state.mode = checkMode(mode);
     await setFormMode(mode === 'form');
-    await state.studio.chrome.set({ menu: mode === 'edit', toolbar: mode === 'edit' });
+    await applyChrome();
     return { ok: true };
+  },
+
+  /** 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 준다(true) / 숨긴다(false) */
+  async setShowMenu(show) {
+    state.showMenu = show === true || show === 'true' || show === '1';
+    await applyChrome();
+    return { ok: true, showMenu: state.showMenu };
   },
 
   /** 문서 전체 편집 권한을 준다(true)/뺀다(false). 빼면 자유 편집 중이던 화면은 작성(form)으로 돌아간다 */
   async setPermission(canEdit) {
     state.allowEdit = canEdit === true || canEdit === 'true' || canEdit === '1';
     if (!state.allowEdit && state.mode === 'edit' && state.studio) await api.setMode('form');
+    else await applyChrome();
     emit('permission', { canEdit: state.allowEdit });
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
@@ -312,5 +329,7 @@ state.studio = await createStudio('#editor', {
   chrome: { menu: false, toolbar: false, statusbar: false },
 });
 hookEditorKeys();
+// 에디터 원래 화면(메뉴·도구 모음)이 잠깐 보였다 사라지지 않게, 숨긴 상태로 만든 뒤 보인다
+document.querySelector('#editor').style.visibility = 'visible';
 window.hwpBridgeReady = true;
 emit('ready');

@@ -302,7 +302,23 @@ public:
 	}
 
 	DECLARE_PROTECT_FINAL_CONSTRUCT()
-	HRESULT FinalConstruct() { return S_OK; }
+	typedef IDispatchImpl<IHwpxEditor, &IID_IHwpxEditor, &LIBID_HwpxpbLib, 1, 0> DispBase;
+	typedef IProvideClassInfo2Impl<&CLSID_HwpxEditorControl, &DIID_IHwpxEditorEvents, &LIBID_HwpxpbLib> ClassInfoBase;
+
+	// 형식 정보(typelib)를 레지스트리 대신 OCX 파일에서 직접 읽는다.
+	// 등록/해제를 여러 번 하거나 폴더를 옮겨 레지스트리의 typelib 경로가 어긋나도 속성·메서드 호출이 되게 한다.
+	HRESULT FinalConstruct() {
+		if (!DispBase::_tih.m_pInfo || !ClassInfoBase::_tih.m_pInfo) {
+			wchar_t path[MAX_PATH * 2] = {};
+			GetModuleFileNameW(_AtlBaseModule.GetModuleInstance(), path, ARRAYSIZE(path));
+			CComPtr<ITypeLib> lib;
+			if (SUCCEEDED(LoadTypeLibEx(path, REGKIND_NONE, &lib)) && lib) {
+				if (!DispBase::_tih.m_pInfo) lib->GetTypeInfoOfGuid(IID_IHwpxEditor, &DispBase::_tih.m_pInfo);
+				if (!ClassInfoBase::_tih.m_pInfo) lib->GetTypeInfoOfGuid(CLSID_HwpxEditorControl, &ClassInfoBase::_tih.m_pInfo);
+			}
+		}
+		return S_OK;
+	}
 	void FinalRelease() { CloseWebView(); }
 
 	// ---- PB 에서 부르는 메서드 ----------------------------------------------------
@@ -390,6 +406,13 @@ public:
 	STDMETHOD(get_PdfLandscape)(VARIANT_BOOL* value) { return Ret(value, m_landscape); }
 	STDMETHOD(put_PdfLandscape)(VARIANT_BOOL value) {
 		m_landscape = value != VARIANT_FALSE;
+		return S_OK;
+	}
+	// 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지 (권한 없는 사용자에게는 항상 숨김)
+	STDMETHOD(get_ShowMenu)(VARIANT_BOOL* value) { return Ret(value, m_showMenu); }
+	STDMETHOD(put_ShowMenu)(VARIANT_BOOL value) {
+		m_showMenu = value != VARIANT_FALSE;
+		if (m_ready) Call(L"setShowMenu", {m_showMenu ? L"true" : L"false"});
 		return S_OK;
 	}
 	STDMETHOD(get_AllowEdit)(VARIANT_BOOL* value) { return Ret(value, m_allowEdit); }
@@ -545,6 +568,7 @@ private:
 	std::wstring m_missing; // 마지막으로 못 찾은 화면 파일
 	bool m_landscape = false;
 	bool m_allowEdit = false;
+	bool m_showMenu = false;
 	int m_nextCallId = 0;
 	int m_callDepth = 0;
 	std::map<int, Result> m_results;
@@ -852,7 +876,7 @@ private:
 		std::wstring ev = JsonString(m, L"event");
 		if (ev == L"ready") {
 			// 권한을 먼저 넘긴 뒤 PB 에 Ready 를 알린다
-			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setPermission(") + (m_allowEdit ? L"true" : L"false") + L")").c_str(), nullptr);
+			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setShowMenu(") + (m_showMenu ? L"true" : L"false") + L").then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") + L")})").c_str(), nullptr);
 			m_web->ExecuteScript(L"window.__hwpxReady=true", nullptr);
 			m_ready = true;
 			m_status = L"준비됨";
