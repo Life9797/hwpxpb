@@ -20,6 +20,7 @@
 #include <wincrypt.h>
 #include <winspool.h>
 #include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
 
 #include <cstdlib>
 #include <cwctype>
@@ -317,6 +318,8 @@ public:
 				if (!ClassInfoBase::_tih.m_pInfo) lib->GetTypeInfoOfGuid(CLSID_HwpxEditorControl, &ClassInfoBase::_tih.m_pInfo);
 			}
 		}
+		// 브라우저 프로세스를 미리 띄운다 (PB 가 컨트롤 창을 만드는 동안 함께 진행)
+		StartEnvironment();
 		return S_OK;
 	}
 	void FinalRelease() { CloseWebView(); }
@@ -389,6 +392,7 @@ public:
 	STDMETHOD(get_Status)(BSTR* value) { return Ret(value, m_status); }
 	/** 쓰는 WebView2 런타임 버전 */
 	STDMETHOD(get_BrowserVersion)(BSTR* value) { return Ret(value, m_browserVersion); }
+	STDMETHOD(get_StartupTimes)(BSTR* value) { return Ret(value, StartupTimes()); }
 	STDMETHOD(get_TimeoutSeconds)(long* value) {
 		if (!value) return E_POINTER;
 		*value = m_timeout;
@@ -566,6 +570,7 @@ private:
 	CComPtr<ICoreWebView2> m_web;
 	bool m_ready = false;
 	bool m_closed = false;
+	bool m_envStarted = false;
 	std::wstring m_lastError;
 	std::wstring m_status = L"컨트롤 창이 아직 만들어지지 않았습니다 (PB 가 컨트롤을 활성화하기 전)";
 	std::wstring m_browserVersion;
@@ -659,14 +664,37 @@ private:
 	void CloseWebView() {
 		m_ready = false;
 		m_closed = true;
+		m_envStarted = false;
 		if (m_controller) m_controller->Close();
 		m_controller.Release();
 		m_web.Release();
 		m_env.Release();
 	}
 
+	// ---- 시작 시간 기록 (Status·StartupTimes 로 보인다) ----
+	ULONGLONG m_t0 = GetTickCount64();
+	ULONGLONG m_tEnv = 0, m_tController = 0, m_tPage = 0, m_tReady = 0;
+	static std::wstring Sec(ULONGLONG from, ULONGLONG to) {
+		if (!from || !to || to < from) return L"-";
+		wchar_t buf[32];
+		swprintf_s(buf, L"%.1f초", (to - from) / 1000.0);
+		return buf;
+	}
+	std::wstring StartupTimes() const {
+		return L"런타임 " + Sec(m_t0, m_tEnv) + L", 화면 " + Sec(m_tEnv > m_tController ? m_tEnv : m_tController, m_tPage) +
+			L", 에디터 " + Sec(m_tPage, m_tReady) + L", 합계 " + Sec(m_t0, m_tReady);
+	}
+
+	// 창이 만들어질 때(OnCreate) 부른다. 런타임(브라우저 프로세스)은 컨트롤이 생길 때 미리 띄워 두고,
+	// 창이 생기면 바로 화면을 붙인다.
 	void InitWebView() {
 		m_closed = false;
+		if (!m_envStarted) StartEnvironment();
+		else if (m_env && !m_controller) CreateController();
+	}
+
+	void StartEnvironment() {
+		m_envStarted = true;
 		std::wstring base = ModuleDir();
 		// 설치 폴더에 webview2\ (고정 버전 런타임)가 있으면 그것을 쓴다. 없으면 PC 에 설치된 런타임
 		std::wstring fixed = base + L"\\webview2";
@@ -686,37 +714,51 @@ private:
 		CoTaskMemFree(version);
 		m_status = L"WebView2 시작 중 (런타임 " + m_browserVersion + (useFixed ? L", 고정 버전)" : L")");
 
-		HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixed.c_str() : nullptr, dataDir.c_str(), nullptr,
+		// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등)
+		auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+		options->put_AdditionalBrowserArguments(
+			L"--disable-features=msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run");
+
+		HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixed.c_str() : nullptr, dataDir.c_str(), options.Get(),
 			Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
 				[this, keep](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-					if (m_closed) return S_OK;
+					if (!m_envStarted) return S_OK;  // 그 사이 닫힘
 					if (FAILED(result) || !env) {
 						Fail(L"WebView2 초기화 실패: WebView2 런타임이 설치되어 있는지 확인하세요" + HrText(result));
 						return S_OK;
 					}
 					m_env = env;
-					m_status = L"WebView2 화면 만드는 중";
-					HRESULT hr2 = env->CreateCoreWebView2Controller(m_hWnd,
-						Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-							[this, keep](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
-								if (m_closed) {
-									if (controller) controller->Close();
-									return S_OK;
-								}
-								if (FAILED(r) || !controller) {
-									Fail(L"WebView2 초기화 실패" + HrText(r));
-									return S_OK;
-								}
-								m_controller = controller;
-								m_controller->get_CoreWebView2(&m_web);
-								Resize();
-								Navigate();
-								return S_OK;
-							}).Get());
-					if (FAILED(hr2)) Fail(L"WebView2 초기화 실패" + HrText(hr2));
+					m_tEnv = GetTickCount64();
+					if (IsWindow() && !m_closed) CreateController();
+					else m_status = L"WebView2 준비됨, 컨트롤 창을 기다리는 중";
 					return S_OK;
 				}).Get());
 		if (FAILED(hr)) Fail(L"WebView2 초기화 실패: WebView2 런타임이 설치되어 있는지 확인하세요" + HrText(hr));
+	}
+
+	void CreateController() {
+		if (!m_env || m_controller || !IsWindow()) return;
+		CComPtr<IUnknown> keep(GetUnknown());
+		m_status = L"WebView2 화면 만드는 중";
+		HRESULT hr2 = m_env->CreateCoreWebView2Controller(m_hWnd,
+			Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+				[this, keep](HRESULT r, ICoreWebView2Controller* controller) -> HRESULT {
+					if (m_closed) {
+						if (controller) controller->Close();
+						return S_OK;
+					}
+					if (FAILED(r) || !controller) {
+						Fail(L"WebView2 초기화 실패" + HrText(r));
+						return S_OK;
+					}
+					m_controller = controller;
+					m_tController = GetTickCount64();
+					m_controller->get_CoreWebView2(&m_web);
+					Resize();
+					Navigate();
+					return S_OK;
+				}).Get());
+		if (FAILED(hr2)) Fail(L"WebView2 초기화 실패" + HrText(hr2));
 	}
 
 	void Navigate() {
@@ -797,7 +839,10 @@ private:
 					BOOL ok = FALSE;
 					args->get_IsSuccess(&ok);
 					if (ok) {
-						if (!m_ready) m_status = L"화면 열림, 에디터 시작 중";
+						if (!m_ready) {
+							m_tPage = GetTickCount64();
+							m_status = L"화면 열림, 에디터 시작 중";
+						}
 					} else {
 						COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
 						args->get_WebErrorStatus(&st);
@@ -886,7 +931,8 @@ private:
 			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setShowMenu(") + (m_showMenu ? L"true" : L"false") + L").then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") + L")})").c_str(), nullptr);
 			m_web->ExecuteScript(L"window.__hwpxReady=true", nullptr);
 			m_ready = true;
-			m_status = L"준비됨";
+			m_tReady = GetTickCount64();
+			m_status = L"준비됨 (" + StartupTimes() + L")";
 			QueueEvent(1);
 		} else if (ev == L"jserror") {
 			std::wstring msg = L"화면 스크립트 오류: " + JsonString(m, L"message");
