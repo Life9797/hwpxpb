@@ -232,6 +232,12 @@ const api = {
     return { ok: true, table: doc.dbTable, schema: doc.schema() };
   },
 
+  /** DB 컬럼 이름 목록. order = 'document'(문서 순서, 기본) | 'created'(개체를 넣은 순서) */
+  async getColumns(order = 'document') {
+    const doc = new HwpxDocument(state.template ?? (await currentBytes()));
+    return { ok: true, table: doc.dbTable, columns: doc.columns(order) };
+  },
+
   /** 값 대입. values = {컬럼: 값}. 결과 {applied, unknown, rejected} */
   async setFields(values, comboSep = ':') {
     if (typeof values === 'string') values = JSON.parse(values || '{}');

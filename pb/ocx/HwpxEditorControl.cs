@@ -47,6 +47,7 @@ namespace Hwpxpb
         [DispId(21)] bool SetFieldValue(string column, string value, string comboSep);
         [DispId(22)] string GetFieldsTsv(string comboSep);
         [DispId(23)] string GetTable();
+        [DispId(33)] string GetColumns(string order);
         // 출력 (빈 칸 안내문은 찍지 않는다)
         [DispId(24)] bool Print();
         [DispId(25)] bool PrintTo(string printerName, int copies);
@@ -227,6 +228,16 @@ namespace Hwpxpb
                 sb.Append(kv.Key).Append('\t').Append(v).Append("\r\n");
             }
             return sb.ToString();
+        }
+
+        /// <summary>DB 컬럼 이름을 탭으로 이어서. order = "document" | "created"(개체를 넣은 순서)</summary>
+        public string GetColumns(string order)
+        {
+            var r = Parse(Call("getColumns", string.IsNullOrEmpty(order) ? "document" : order));
+            if (r == null || !r.TryGetValue("columns", out var c) || !(c is System.Collections.IEnumerable list)) return "";
+            var names = new List<string>();
+            foreach (var x in list) names.Add(Convert.ToString(x));
+            return string.Join("\t", names);
         }
 
         public string GetTable()

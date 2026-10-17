@@ -93,6 +93,7 @@ def iter_fields(xml: str) -> Iterator[dict]:
         end = xml.rfind("<hp:ctrl>", 0, end_pos)
         yield {
             "name": attr(tag, "name"),
+            "id": int(fid) if (fid or "").isdigit() else 0,
             "tag": tag,
             "tag_start": m.start(),
             "guide": guide_text(xml[m.start():block_end]),
@@ -176,17 +177,35 @@ class HwpxDocument:
         out: list[dict] = []
         for s in self.sections:
             xml = self.xml(s)
+            # order: 만든 순서. 누름틀은 id(넣을 때마다 커짐), 양식 개체는 tabOrder(넣은 순서로 매겨짐)
             for f in iter_fields(xml):
-                out.append({"name": f["name"], "type": "clickhere", "guide": f["guide"]})
+                out.append({"name": f["name"], "type": "clickhere", "guide": f["guide"], "order": f["id"]})
             for m in FORM_RE.finditer(xml):
                 kind = FORM_KIND[m.group(1)]
-                item: dict[str, Any] = {"name": attr(m.group(0), "name"), "type": kind}
+                tab = attr(m.group(0), "tabOrder")
+                item: dict[str, Any] = {"name": attr(m.group(0), "name"), "type": kind, "order": int(tab) if (tab or "").isdigit() else 0}
                 if kind == "radio":
                     item["group"] = attr(m.group(0), "radioGroupName")
                     item["caption"] = attr(m.group(0), "caption")
                 if kind == "combobox":
                     item["items"] = combo_items(xml, m.end())
                 out.append(item)
+        return out
+
+    def columns(self, order: str = "document") -> list[str]:
+        """DB 컬럼 이름 목록. order="created" 면 넣은 순서: 누름틀(id 순) 다음 양식 개체(tabOrder 순)"""
+        if order != "created":
+            return list(self.extract()["values"].keys())
+        items = sorted(enumerate(self.schema()), key=lambda p: (p[1]["type"] != "clickhere", p[1]["order"], p[0]))
+        out: list[str] = []
+        for _, it in items:
+            col = it["name"]
+            if it["type"] == "checkbox" and SEP in col:
+                col = col[: col.index(SEP)]
+            elif it["type"] == "radio":
+                col = it.get("group") or it["name"]
+            if col not in out:
+                out.append(col)
         return out
 
     def extract_raw(self) -> dict[str, Any]:

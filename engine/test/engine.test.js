@@ -120,3 +120,13 @@ test('hideGuides: 빈 칸의 안내문만 지우고 입력된 값은 둔다 (출
   assert.equal(v.MEMO, '메모');
   assert.equal(v.PT_NM, '');
 });
+
+test('columns: 문서 순서와 넣은 순서(누름틀 id 순 → 양식 개체 tabOrder 순)', () => {
+  const d = open();
+  const doc = d.columns();
+  const created = d.columns('created');
+  assert.deepEqual([...created].sort(), [...doc].sort());
+  const kinds = new Map(d.schema().map((x) => [x.type === 'radio' ? x.group : x.name.split('__')[0], x.type]));
+  const firstForm = created.findIndex((c) => kinds.get(c) !== 'clickhere');
+  assert.ok(created.slice(firstForm).every((c) => kinds.get(c) !== 'clickhere'));
+});

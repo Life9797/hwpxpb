@@ -73,6 +73,7 @@ function* iterFields(xml) {
     const end = xml.lastIndexOf('<hp:ctrl>', endPos);
     yield {
       name: attr(tag, 'name'),
+      id: Number(id) || 0,
       tag,
       tagStart: m.index,
       guide: guideText(xml.slice(m.index, blockEnd)),
@@ -142,10 +143,11 @@ export class HwpxDocument {
     const out = [];
     for (const s of this.sections) {
       const xml = this.xml(s);
-      for (const f of iterFields(xml)) out.push({ name: f.name, type: 'clickhere', guide: f.guide });
+      // order: 만든 순서. 누름틀은 id(넣을 때마다 커짐), 양식 개체는 tabOrder(넣은 순서로 매겨짐)
+      for (const f of iterFields(xml)) out.push({ name: f.name, type: 'clickhere', guide: f.guide, order: f.id });
       for (const m of xml.matchAll(FORM_RE)) {
         const type = FORM_KIND[m[1]];
-        const item = { name: attr(m[0], 'name'), type };
+        const item = { name: attr(m[0], 'name'), type, order: Number(attr(m[0], 'tabOrder')) || 0 };
         if (type === 'radio') {
           item.group = attr(m[0], 'radioGroupName');
           item.caption = attr(m[0], 'caption');
@@ -280,6 +282,26 @@ export class HwpxDocument {
       this.entries[s] = enc.encode(xml);
     }
     return this;
+  }
+
+  /**
+   * DB 컬럼 이름 목록.
+   * order='document' 는 문서에 나오는 순서(extract 와 같음),
+   * order='created' 는 개체를 넣은 순서: 누름틀(id 순) 다음에 양식 개체(tabOrder 순).
+   * HWPX 에는 누름틀과 양식 개체를 함께 비교할 시각 정보가 없어서 두 무리는 이 순서로 잇는다.
+   */
+  columns(order = 'document') {
+    if (order !== 'created') return Object.keys(this.extract().values);
+    const items = this.schema().map((it, i) => ({ ...it, i }));
+    items.sort((a, b) => (a.type !== 'clickhere') - (b.type !== 'clickhere') || a.order - b.order || a.i - b.i);
+    const out = [];
+    for (const it of items) {
+      let col = it.name;
+      if (it.type === 'checkbox' && col.includes(SEP)) col = col.slice(0, col.indexOf(SEP));
+      else if (it.type === 'radio') col = it.group || it.name;
+      if (!out.includes(col)) out.push(col);
+    }
+    return out;
   }
 
   /** DB 컬럼 기준 추출: {table, values:{컬럼: 값}} */

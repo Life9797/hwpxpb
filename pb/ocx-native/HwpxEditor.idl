@@ -45,6 +45,7 @@ interface IHwpxEditor : IDispatch
 	[id(31), propget] HRESULT BrowserVersion([out, retval] BSTR* value);
 	[id(32), propget] HRESULT ShowMenu([out, retval] VARIANT_BOOL* value);
 	[id(32), propput] HRESULT ShowMenu([in] VARIANT_BOOL value);
+	[id(33)] HRESULT GetColumns([in] BSTR order, [out, retval] BSTR* result);
 };
 
 [

@@ -441,6 +441,13 @@ public:
 		return Ret(result, r.ok ? r.payload : L"");
 	}
 
+	/** DB 컬럼 이름을 탭으로 이어서. order = "document"(문서 순서) | "created"(개체를 넣은 순서) */
+	STDMETHOD(GetColumns)(BSTR order, BSTR* result) {
+		std::wstring o = Str(order);
+		Result r = Call(L"getColumns", {Js(o.empty() ? L"document" : o)}, L"function(o){return (o.columns||[]).join('\\t')}");
+		return Ret(result, r.ok ? r.payload : L"");
+	}
+
 	STDMETHOD(GetTable)(BSTR* result) {
 		Result r = Call(L"getSchema", {}, L"function(o){return o.table||''}");
 		return Ret(result, r.ok ? r.payload : L"");

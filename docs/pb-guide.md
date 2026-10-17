@@ -54,6 +54,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `Open(path, mode)` | 파일 열기. mode = `form`(작성: 값만 입력, 기본) / `edit`(편집: 문서 전체, **AllowEdit 필요**) / `view` |
 | `AllowEdit` (속성) | 문서 전체 편집 권한. 기본 `false` = 작성만. PB 의 사용자 권한에 따라 `true` 로 둠 (아래 "편집 권한") |
 | `ShowMenu` (속성) | 원래 에디터 메뉴·도구 모음 표시. 권한 없는 사용자에게는 항상 숨김. 권한자는 편집 모드에서 보이고, `true` 면 작성 모드에서도 보임. 기본 `false` |
+| `GetColumns(order)` | DB 컬럼 이름을 탭으로 이어서. `order` = `"document"`(문서에 나오는 순서) / `"created"`(한글에서 개체를 넣은 순서: 누름틀 다음 양식 개체) |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |
 | `GetFieldValue(column, comboSep)` | 값 하나 읽기 |
