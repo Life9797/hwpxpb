@@ -33,6 +33,7 @@ cp "$ROOT/node_modules/fflate/esm/browser.js" "$OUT/vendor/fflate/"
 cp "$RHWP/npm/editor/index.js" "$RHWP/npm/editor/transport.js" "$RHWP/npm/editor/document-agent-contract.js" "$OUT/vendor/rhwp-editor/"
 cp -r "$RHWP/rhwp-studio/dist" "$OUT/studio"
 rm -rf "$OUT/studio/samples"   # rhwp 예제 문서 (필요 없음)
+node "$ROOT/scripts/patch-studio-dist.mjs" "$OUT/studio"   # 속도 보완 (글꼴 setter 캐시)
 cp "$RHWP/LICENSE" "$OUT/studio/RHWP-LICENSE.txt"
 
 echo "완료: $OUT"
