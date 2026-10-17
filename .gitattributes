@@ -1,0 +1,2 @@
+# 빌드된 에디터 화면 (scripts/build-pb-web.sh 결과). 코드 리뷰 diff 에서 접어 둔다
+pb/dist/** linguist-generated=true -diff

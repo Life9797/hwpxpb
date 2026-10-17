@@ -1,0 +1,9 @@
+{
+  "name": "hwpxpb",
+  "private": true,
+  "license": "MIT",
+  "workspaces": ["engine"],
+  "scripts": {
+    "test": "npm test --workspaces"
+  }
+}

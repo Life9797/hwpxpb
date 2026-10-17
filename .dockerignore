@@ -1,0 +1,7 @@
+node_modules
+.build
+pb/ocx/bin
+pb/ocx/obj
+docs
+.git
+**/__pycache__
