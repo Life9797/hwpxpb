@@ -226,6 +226,27 @@ const api = {
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
+  /**
+   * 화면을 처음 상태로 되돌린다. OCX 가 창을 닫을 때 부르고, 이 화면을 다음 창에서 다시 쓴다.
+   * 이전 문서·권한·메뉴·키 설정을 모두 비우고 에디터를 새로 만든다 (이전 문서가 남지 않는다).
+   */
+  async reset() {
+    try {
+      state.studio?.destroy();
+    } catch {
+      // 이미 정리된 에디터
+    }
+    state.studio = null;
+    state.template = null;
+    state.fileName = 'document.hwpx';
+    state.mode = 'form';
+    state.allowEdit = false;
+    state.showMenu = false;
+    Object.assign(keys, DEFAULT_KEYS);
+    await startStudio();
+    return { ok: true };
+  },
+
   /** 개체 목록과 테이블명 */
   async getSchema() {
     const doc = new HwpxDocument(state.template ?? (await currentBytes()));
@@ -329,13 +350,17 @@ window.hwpBridge = new Proxy(api, {
   },
 });
 
-state.studio = await createStudio('#editor', {
-  studioUrl: STUDIO_URL,
-  plugins: ['hwpctrl'],
-  chrome: { menu: false, toolbar: false, statusbar: false },
-});
-hookEditorKeys();
-// 에디터 원래 화면(메뉴·도구 모음)이 잠깐 보였다 사라지지 않게, 숨긴 상태로 만든 뒤 보인다
-document.querySelector('#editor').style.visibility = 'visible';
+async function startStudio() {
+  state.studio = await createStudio('#editor', {
+    studioUrl: STUDIO_URL,
+    plugins: ['hwpctrl'],
+    chrome: { menu: false, toolbar: false, statusbar: false },
+  });
+  hookEditorKeys();
+  // 에디터 원래 화면(메뉴·도구 모음)이 잠깐 보였다 사라지지 않게, 숨긴 상태로 만든 뒤 보인다
+  document.querySelector('#editor').style.visibility = 'visible';
+}
+
+await startStudio();
 window.hwpBridgeReady = true;
 emit('ready');

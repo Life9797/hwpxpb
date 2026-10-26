@@ -24,7 +24,9 @@
 
 #include <cstdlib>
 #include <cwctype>
+#include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -207,11 +209,180 @@ std::wstring Sep(BSTR s) {
 
 }  // namespace
 
+// ---- WebView2 재사용 ---------------------------------------------------------------
+// PB 창을 닫았다 다시 열 때마다 브라우저 프로세스·화면·에디터를 처음부터 시작하지 않도록,
+// 같은 프로세스 안에서 다음 두 가지를 공유한다 (만든 UI 스레드 안에서만).
+//   1) WebView2 환경: 한 번 만들어 두고 컨트롤마다 다시 쓴다 (브라우저 프로세스가 유지된다)
+//   2) 에디터 화면 1개: 창을 닫을 때 새 에디터로 초기화해 숨겨 두었다가, 다음 컨트롤이 가져간다
+// 쓰지 않고 남겨 두는 시간은 환경 변수 HWPXPB_KEEP_SECONDS (초, 기본 600). 0 이면 재사용하지 않는다.
+
+class CHwpxEditor;
+
+namespace {
+
+struct View {
+	enum State { Starting, InUse, Resetting, Parked };
+	CComPtr<ICoreWebView2Controller> controller;
+	CComPtr<ICoreWebView2> web;
+	std::wstring folder;           // 이 화면을 연 web 폴더
+	CHwpxEditor* owner = nullptr;  // 지금 쓰는 컨트롤 (보관 중이면 null)
+	bool broken = false;           // 화면이 열리지 못했거나 프로세스가 죽었다: 다시 쓰지 않는다
+	State state = Starting;
+
+	void Destroy() {
+		owner = nullptr;
+		if (controller) controller->Close();
+		controller.Release();
+		web.Release();
+	}
+};
+
+using EnvDone = std::function<void(HRESULT, ICoreWebView2Environment*)>;
+
+struct Shared {
+	CComPtr<ICoreWebView2Environment> env;
+	DWORD thread = 0;  // env 와 보관 화면을 쓰는 스레드 (STA 라서 다른 스레드에서는 쓰지 않는다)
+	bool envCreating = false;
+	std::vector<EnvDone> waiters;
+	std::shared_ptr<View> parked;  // 보관 중인 화면 (최대 1개)
+	ULONGLONG parkedAt = 0;
+	ULONGLONG lastUse = 0;
+	int live = 0;    // 만들어져 있는 컨트롤 수
+	int callId = 0;  // 호출 번호는 프로세스 전체에서 겹치지 않게 한다 (보관된 화면의 늦은 응답이 새 호출로 오지 않게)
+	HWND host = nullptr;  // 보관 화면의 임시 부모 창 + 유휴 시간 검사 타이머
+};
+
+// 프로세스가 끝날 때 해제하지 않는다 (COM 정리 순서 문제를 피하려고)
+Shared& S() {
+	static Shared* s = new Shared;
+	return *s;
+}
+
+ULONGLONG KeepMs() {
+	static const ULONGLONG v = [] {
+		wchar_t buf[32] = {};
+		DWORD n = GetEnvironmentVariableW(L"HWPXPB_KEEP_SECONDS", buf, ARRAYSIZE(buf));
+		long s = (n > 0 && n < ARRAYSIZE(buf)) ? _wtol(buf) : 600;
+		return static_cast<ULONGLONG>(s < 0 ? 0 : s) * 1000;
+	}();
+	return v;
+}
+
+bool Reuse() { return KeepMs() > 0; }
+
+const wchar_t* const kHostClass = L"HwpxpbReuseHost";
+
+// 유휴 시간이 지난 보관 화면·환경을 정리하고, 아무것도 없으면 임시 창도 없앤다
+void Tick() {
+	Shared& s = S();
+	ULONGLONG now = GetTickCount64();
+	if (s.parked && now - s.parkedAt >= KeepMs()) {
+		s.parked->Destroy();
+		s.parked.reset();
+		s.lastUse = now;
+	}
+	if (!s.parked && s.live == 0 && !s.envCreating && s.env && now - s.lastUse >= KeepMs()) s.env.Release();
+	if (!s.parked && !s.env && s.live == 0 && !s.envCreating && s.host) {
+		KillTimer(s.host, 1);
+		DestroyWindow(s.host);
+		s.host = nullptr;
+		UnregisterClassW(kHostClass, _AtlBaseModule.GetModuleInstance());
+	}
+}
+
+LRESULT CALLBACK HostProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+	if (m == WM_TIMER) {
+		Tick();
+		return 0;
+	}
+	return DefWindowProcW(h, m, w, l);
+}
+
+HWND EnsureHost() {
+	Shared& s = S();
+	if (s.host && IsWindow(s.host)) return s.host;
+	HINSTANCE inst = _AtlBaseModule.GetModuleInstance();
+	WNDCLASSW wc = {};
+	wc.lpfnWndProc = HostProc;
+	wc.hInstance = inst;
+	wc.lpszClassName = kHostClass;
+	RegisterClassW(&wc);  // 이미 등록돼 있으면 실패하지만 상관없다
+	s.host = CreateWindowExW(WS_EX_TOOLWINDOW, kHostClass, L"", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
+	if (s.host) SetTimer(s.host, 1, 30000, nullptr);
+	return s.host;
+}
+
+/**
+ * WebView2 환경을 받는다. 재사용이 켜져 있으면 프로세스 안에서 하나만 만들어 나눠 쓴다.
+ * done 은 환경이 이미 있으면 바로(동기), 아니면 만들어진 뒤에 불린다.
+ */
+void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstring& dataDir, EnvDone done) {
+	Shared& s = S();
+	DWORD me = GetCurrentThreadId();
+	bool share = Reuse() && (s.thread == me || (!s.env && !s.envCreating && !s.parked));
+	if (share) {
+		s.thread = me;
+		if (s.env) {
+			CComPtr<ICoreWebView2Environment> env = s.env;
+			done(S_OK, env);
+			return;
+		}
+		if (s.envCreating) {
+			s.waiters.push_back(done);
+			return;
+		}
+		s.envCreating = true;
+		s.lastUse = GetTickCount64();
+		s.waiters.push_back(done);
+		EnsureHost();
+	}
+
+	auto finish = [share, done](HRESULT hr, ICoreWebView2Environment* env) {
+		if (!share) {
+			done(hr, env);
+			return;
+		}
+		Shared& sh = S();
+		sh.envCreating = false;
+		if (SUCCEEDED(hr) && env) sh.env = env;
+		std::vector<EnvDone> waiting;
+		waiting.swap(sh.waiters);
+		for (auto& f : waiting) f(hr, env);
+	};
+
+	// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등)
+	auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+	options->put_AdditionalBrowserArguments(
+		L"--disable-features=msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run");
+
+	HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixedDir.c_str() : nullptr, dataDir.c_str(), options.Get(),
+		Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+			[finish](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+				finish(result, env);
+				return S_OK;
+			}).Get());
+	if (FAILED(hr)) finish(hr, nullptr);
+}
+
+// 창을 닫을 때 보관하는 화면에 보내는 초기화 (에디터를 새로 만들고 이전 문서·권한을 비운다)
+const wchar_t* const kResetScript =
+	L"window.hwpBridge.reset().then(function(s){var o=null;try{o=JSON.parse(s);}catch(e){}"
+	L"window.chrome.webview.postMessage(JSON.stringify({event:(o&&o.ok)?'reset':'resetFailed',message:String((o&&o.error)||'')}));});";
+
+}  // namespace
+
 // ---- 이벤트 (PB 의 ready / loaded / erroroccurred) -------------------------------
 
 template <class T>
 class CProxyHwpxEditorEvents : public IConnectionPointImpl<T, &DIID_IHwpxEditorEvents> {
 public:
+	/** PB 가 이벤트를 받을 준비(연결)를 했는지 */
+	bool HasSink() {
+		for (int i = 0; i < this->m_vec.GetSize(); i++)
+			if (this->m_vec.GetAt(i)) return true;
+		return false;
+	}
+
 	// args 는 DISPPARAMS 규칙대로 뒤에서부터
 	void FireDispEvent(DISPID id, VARIANT* args, UINT count) {
 		std::vector<CComPtr<IUnknown>> sinks;
@@ -290,6 +461,7 @@ public:
 		MESSAGE_HANDLER(WM_SIZE, OnSize)
 		MESSAGE_HANDLER(WM_SETFOCUS, OnFocus)
 		MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
+		MESSAGE_HANDLER(WM_TIMER, OnTimer)
 		MESSAGE_HANDLER(WM_HWPX_EVENTS, OnHwpxEvents)
 		CHAIN_MSG_MAP(CComControl<CHwpxEditor>)
 		DEFAULT_REFLECTION_HANDLER()
@@ -318,11 +490,17 @@ public:
 				if (!ClassInfoBase::_tih.m_pInfo) lib->GetTypeInfoOfGuid(CLSID_HwpxEditorControl, &ClassInfoBase::_tih.m_pInfo);
 			}
 		}
+		S().live++;
 		// 브라우저 프로세스를 미리 띄운다 (PB 가 컨트롤 창을 만드는 동안 함께 진행)
 		StartEnvironment();
 		return S_OK;
 	}
-	void FinalRelease() { CloseWebView(); }
+	void FinalRelease() {
+		CloseWebView();
+		Shared& s = S();
+		if (s.live > 0) s.live--;
+		s.lastUse = GetTickCount64();
+	}
 
 	// ---- PB 에서 부르는 메서드 ----------------------------------------------------
 
@@ -568,6 +746,10 @@ private:
 	CComPtr<ICoreWebView2Environment> m_env;
 	CComPtr<ICoreWebView2Controller> m_controller;
 	CComPtr<ICoreWebView2> m_web;
+	std::shared_ptr<View> m_view;  // 컨트롤러·화면 묶음. 창을 닫을 때 보관했다가 다른 컨트롤이 가져갈 수 있다
+	bool m_reused = false;         // 보관돼 있던 화면을 가져와 썼다
+	bool m_waitingReset = false;   // 가져온 화면의 초기화가 끝나기를 기다리는 중
+	int m_sinkWaits = 0;           // PB 가 이벤트를 받을 준비를 하기까지 기다린 횟수
 	bool m_ready = false;
 	bool m_closed = false;
 	bool m_envStarted = false;
@@ -581,7 +763,6 @@ private:
 	bool m_landscape = false;
 	bool m_allowEdit = false;
 	bool m_showMenu = false;
-	int m_nextCallId = 0;
 	int m_callDepth = 0;
 	std::map<int, Result> m_results;
 	std::vector<PendingEvent> m_events;
@@ -612,6 +793,13 @@ private:
 
 	LRESULT OnHwpxEvents(UINT, WPARAM, LPARAM, BOOL&) {
 		if (m_callDepth > 0) return 0;  // 호출이 끝나면 다시 보낸다
+		// 재사용한 화면은 Ready 가 창이 만들어지자마자 오므로, PB 가 이벤트를 받을 준비를 할 때까지 (최대 5초) 기다린다
+		if (!m_events.empty() && !HasSink() && m_sinkWaits < 100) {
+			m_sinkWaits++;
+			SetTimer(kEventTimer, 50);
+			return 0;
+		}
+		m_sinkWaits = 0;
 		std::vector<PendingEvent> events;
 		events.swap(m_events);
 		for (auto& e : events) {
@@ -662,13 +850,138 @@ private:
 	}
 
 	void CloseWebView() {
+		bool parked = Park();  // 창이 아직 있을 때(OnDestroy)만 보관할 수 있다
 		m_ready = false;
 		m_closed = true;
 		m_envStarted = false;
-		if (m_controller) m_controller->Close();
+		m_waitingReset = false;
+		if (IsWindow()) {
+			KillTimer(kResetTimer);
+			KillTimer(kEventTimer);
+		}
+		if (!parked) {
+			if (m_view) m_view->Destroy();
+			else if (m_controller) m_controller->Close();
+		}
+		m_view.reset();
 		m_controller.Release();
 		m_web.Release();
 		m_env.Release();
+	}
+
+	// ---- 화면 재사용 (자세한 설명은 위의 "WebView2 재사용") ------------------------------
+
+	static const UINT_PTR kResetTimer = 1;
+	static const UINT_PTR kEventTimer = 2;
+
+	LRESULT OnTimer(UINT, WPARAM id, LPARAM, BOOL& handled) {
+		handled = FALSE;
+		if (id == kResetTimer) {
+			KillTimer(kResetTimer);
+			// 가져온 화면의 초기화가 끝나지 않으면 새 화면으로 시작한다
+			if (m_waitingReset && !m_ready) RecoverCold();
+			handled = TRUE;
+		} else if (id == kEventTimer) {
+			KillTimer(kEventTimer);
+			PostMessage(WM_HWPX_EVENTS);
+			handled = TRUE;
+		}
+		return 0;
+	}
+
+	/** 창을 닫을 때: 에디터를 새로 초기화해 숨겨 두고, 다음 컨트롤이 가져가게 한다. 보관했으면 true */
+	bool Park() {
+		Shared& s = S();
+		if (!Reuse() || !m_view || !m_ready || m_view->broken || !m_controller || !m_web || !IsWindow()) return false;
+		if (s.parked || s.thread != GetCurrentThreadId() || m_env.p != s.env.p) return false;
+		HWND host = EnsureHost();
+		if (!host) return false;
+		m_controller->put_IsVisible(FALSE);
+		if (FAILED(m_controller->put_ParentWindow(host))) {
+			m_controller->put_IsVisible(TRUE);
+			return false;
+		}
+		m_view->owner = nullptr;
+		m_view->state = View::Resetting;
+		m_web->ExecuteScript(kResetScript, nullptr);
+		s.parked = m_view;
+		s.parkedAt = s.lastUse = GetTickCount64();
+		return true;
+	}
+
+	/** 보관 중인 화면이 쓸 수 있으면 가져온다 (같은 스레드, 같은 web 폴더) */
+	bool TryAttachParked() {
+		Shared& s = S();
+		if (!Reuse() || !s.parked || s.thread != GetCurrentThreadId() || !IsWindow() || m_env.p != s.env.p) return false;
+		std::wstring want = m_webFolder.empty() ? ModuleDir() + L"\\web" : m_webFolder;
+		std::shared_ptr<View> v = s.parked;
+		if (v->broken || _wcsicmp(v->folder.c_str(), want.c_str()) != 0) {
+			s.parked.reset();  // 쓸 수 없는 화면은 버리고 새로 만든다
+			v->Destroy();
+			return false;
+		}
+		s.parked.reset();
+		v->owner = this;
+		m_view = v;
+		m_controller = v->controller;
+		m_web = v->web;
+		m_folder = v->folder;
+		m_reused = true;
+		m_tController = m_tPage = GetTickCount64();
+		m_controller->put_ParentWindow(m_hWnd);
+		Resize();
+		m_controller->put_IsVisible(TRUE);
+		m_controller->NotifyParentWindowPositionChanged();
+		if (v->state == View::Parked) {
+			v->state = View::InUse;
+			m_status = L"재사용한 화면 설정 중";
+			ApplySettings();
+		} else {
+			// 닫을 때 시작한 초기화가 아직 끝나지 않았다. 끝나면 'reset' 이벤트가 온다
+			m_waitingReset = true;
+			m_status = L"재사용한 화면 초기화 기다리는 중";
+			SetTimer(kResetTimer, 15000);
+		}
+		return true;
+	}
+
+	/** 재사용을 포기하고 새 화면으로 시작한다 (초기화 실패·시간 초과) */
+	void RecoverCold() {
+		m_waitingReset = false;
+		if (IsWindow()) KillTimer(kResetTimer);
+		if (m_view) {
+			m_view->Destroy();
+			m_view.reset();
+		}
+		m_controller.Release();
+		m_web.Release();
+		m_reused = false;
+		m_status = L"재사용하지 못해 새로 시작합니다";
+		CreateControllerCold();
+	}
+
+	/**
+	 * 에디터가 준비됐을 때: 메뉴·편집 권한을 넘기고, 둘 다 적용된 뒤에야 PB 에 Ready 를 알린다.
+	 * ExecuteScript 는 Promise 의 완료를 기다리지 않으므로 JS 가 완료 이벤트(permissionsReady)를 보낸다.
+	 */
+	void ApplySettings() {
+		if (!m_web) return;
+		std::wstring script =
+			std::wstring(L"window.hwpBridge.setShowMenu(") + (m_showMenu ? L"true" : L"false") +
+			L").then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") +
+			L");}).then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})"
+			L".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
+		m_web->ExecuteScript(script.c_str(), nullptr);
+	}
+
+	// 보관 중인 화면(주인 없음)에 오는 메시지: 초기화 결과만 본다
+	static void OrphanMessage(View& v, const std::wstring& m) {
+		std::wstring ev = JsonString(m, L"event");
+		if (ev == L"reset") {
+			if (v.state == View::Resetting) v.state = View::Parked;
+		} else if (ev == L"resetFailed") {
+			v.broken = true;
+		}
 	}
 
 	// ---- 시작 시간 기록 (Status·StartupTimes 로 보인다) ----
@@ -681,7 +994,7 @@ private:
 		return buf;
 	}
 	std::wstring StartupTimes() const {
-		return L"런타임 " + Sec(m_t0, m_tEnv) + L", 화면 " + Sec(m_tEnv > m_tController ? m_tEnv : m_tController, m_tPage) +
+		return std::wstring(m_reused ? L"재사용, " : L"") + L"런타임 " + Sec(m_t0, m_tEnv) + L", 화면 " + Sec(m_tEnv > m_tController ? m_tEnv : m_tController, m_tPage) +
 			L", 에디터 " + Sec(m_tPage, m_tReady) + L", 합계 " + Sec(m_t0, m_tReady);
 	}
 
@@ -714,29 +1027,27 @@ private:
 		CoTaskMemFree(version);
 		m_status = L"WebView2 시작 중 (런타임 " + m_browserVersion + (useFixed ? L", 고정 버전)" : L")");
 
-		// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등)
-		auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
-		options->put_AdditionalBrowserArguments(
-			L"--disable-features=msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run");
-
-		HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixed.c_str() : nullptr, dataDir.c_str(), options.Get(),
-			Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-				[this, keep](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-					if (!m_envStarted) return S_OK;  // 그 사이 닫힘
-					if (FAILED(result) || !env) {
-						Fail(L"WebView2 초기화 실패: WebView2 런타임이 설치되어 있는지 확인하세요" + HrText(result));
-						return S_OK;
-					}
-					m_env = env;
-					m_tEnv = GetTickCount64();
-					if (IsWindow() && !m_closed) CreateController();
-					else m_status = L"WebView2 준비됨, 컨트롤 창을 기다리는 중";
-					return S_OK;
-				}).Get());
-		if (FAILED(hr)) Fail(L"WebView2 초기화 실패: WebView2 런타임이 설치되어 있는지 확인하세요" + HrText(hr));
+		// 같은 프로세스에 환경이 이미 있으면 그것을 쓴다 (재사용). 없으면 만든다
+		GetEnvironment(fixed, useFixed, dataDir, [this, keep](HRESULT result, ICoreWebView2Environment* env) {
+			if (!m_envStarted) return;  // 그 사이 닫힘
+			if (FAILED(result) || !env) {
+				Fail(L"WebView2 초기화 실패: WebView2 런타임이 설치되어 있는지 확인하세요" + HrText(result));
+				return;
+			}
+			m_env = env;
+			m_tEnv = GetTickCount64();
+			if (IsWindow() && !m_closed) CreateController();
+			else m_status = L"WebView2 준비됨, 컨트롤 창을 기다리는 중";
+		});
 	}
 
 	void CreateController() {
+		if (!m_env || m_controller || !IsWindow()) return;
+		if (TryAttachParked()) return;
+		CreateControllerCold();
+	}
+
+	void CreateControllerCold() {
 		if (!m_env || m_controller || !IsWindow()) return;
 		CComPtr<IUnknown> keep(GetUnknown());
 		m_status = L"WebView2 화면 만드는 중";
@@ -754,6 +1065,10 @@ private:
 					m_controller = controller;
 					m_tController = GetTickCount64();
 					m_controller->get_CoreWebView2(&m_web);
+					m_view = std::make_shared<View>();
+					m_view->controller = m_controller;
+					m_view->web = m_web;
+					m_view->owner = this;
 					Resize();
 					Navigate();
 					return S_OK;
@@ -782,22 +1097,40 @@ private:
 		// 가상 호스트 매핑(SetVirtualHostNameToFolderMapping) 대신 요청을 직접 받아 파일을 돌려준다.
 		// Windows 7 + 109 런타임에서 매핑이 "파일 없음" 페이지를 내는 경우가 있어서, 경로 문제를 Status 로 보이게 한다.
 		m_folder = folder;
+		if (m_view) m_view->folder = folder;
+		// 화면은 컨트롤이 바뀌어도 살아 있을 수 있으므로, 이벤트는 컨트롤이 아니라 View 를 거쳐 지금 주인에게 보낸다
+		std::weak_ptr<View> wv = m_view;
 		EventRegistrationToken token;
 		m_web->AddWebResourceRequestedFilter((std::wstring(L"https://") + kHost + L"/*").c_str(), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL);
 		m_web->add_WebResourceRequested(
 			Callback<ICoreWebView2WebResourceRequestedEventHandler>(
-				[this](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
-					ServeFile(args);
+				[wv](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
+					if (auto v = wv.lock())
+						if (v->owner) v->owner->ServeFile(args);
 					return S_OK;
 				}).Get(),
 			&token);
 		m_web->add_WebMessageReceived(
 			Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-				[this](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+				[wv](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
 					LPWSTR message = nullptr;
 					if (SUCCEEDED(args->TryGetWebMessageAsString(&message)) && message) {
-						OnMessage(message);
+						if (auto v = wv.lock()) {
+							if (v->owner) v->owner->OnMessage(message);
+							else OrphanMessage(*v, message);
+						}
 						CoTaskMemFree(message);
+					}
+					return S_OK;
+				}).Get(),
+			&token);
+		// 화면 프로세스가 죽으면 그 화면은 다시 쓰지 않는다
+		m_web->add_ProcessFailed(
+			Callback<ICoreWebView2ProcessFailedEventHandler>(
+				[wv](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs*) -> HRESULT {
+					if (auto v = wv.lock()) {
+						v->broken = true;
+						if (v->owner) v->owner->Fail(L"WebView2 화면 프로세스가 종료되었습니다");
 					}
 					return S_OK;
 				}).Get(),
@@ -835,25 +1168,34 @@ private:
 			nullptr);
 		m_web->add_NavigationCompleted(
 			Callback<ICoreWebView2NavigationCompletedEventHandler>(
-				[this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+				[wv](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+					auto v = wv.lock();
+					if (!v) return S_OK;
 					BOOL ok = FALSE;
 					args->get_IsSuccess(&ok);
-					if (ok) {
-						if (!m_ready) {
-							m_tPage = GetTickCount64();
-							m_status = L"화면 열림, 에디터 시작 중";
-						}
-					} else {
-						COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+					COREWEBVIEW2_WEB_ERROR_STATUS st = COREWEBVIEW2_WEB_ERROR_STATUS_UNKNOWN;
+					if (!ok) {
 						args->get_WebErrorStatus(&st);
-						Fail(L"에디터 화면을 열지 못했습니다 (WebErrorStatus " + std::to_wstring(static_cast<int>(st)) + L")" +
-						     (m_missing.empty() ? L"" : L" 못 찾은 파일: " + m_missing));
+						v->broken = true;
 					}
+					if (v->owner) v->owner->OnNavigationCompleted(ok != FALSE, st);
 					return S_OK;
 				}).Get(),
 			&token);
 		m_status = L"에디터 화면 여는 중: " + folder;
 		m_web->Navigate((std::wstring(L"https://") + kHost + L"/index.html").c_str());
+	}
+
+	void OnNavigationCompleted(bool ok, COREWEBVIEW2_WEB_ERROR_STATUS st) {
+		if (ok) {
+			if (!m_ready) {
+				m_tPage = GetTickCount64();
+				m_status = L"화면 열림, 에디터 시작 중";
+			}
+		} else {
+			Fail(L"에디터 화면을 열지 못했습니다 (WebErrorStatus " + std::to_wstring(static_cast<int>(st)) + L")" +
+			     (m_missing.empty() ? L"" : L" 못 찾은 파일: " + m_missing));
+		}
 	}
 
 	static const wchar_t* MimeType(const std::wstring& path) {
@@ -927,13 +1269,31 @@ private:
 		// bridge.js 의 이벤트: {"event":"ready"} 등
 		std::wstring ev = JsonString(m, L"event");
 		if (ev == L"ready") {
-			// 권한을 먼저 넘긴 뒤 PB 에 Ready 를 알린다
-			m_web->ExecuteScript((std::wstring(L"window.hwpBridge.setShowMenu(") + (m_showMenu ? L"true" : L"false") + L").then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") + L")})").c_str(), nullptr);
-			m_web->ExecuteScript(L"window.__hwpxReady=true", nullptr);
-			m_ready = true;
-			m_tReady = GetTickCount64();
-			m_status = L"준비됨 (" + StartupTimes() + L")";
-			QueueEvent(1);
+			// 새로 시작한 화면의 에디터가 준비됐다. 권한 적용이 끝나면 permissionsReady 가 온다
+			if (m_view) m_view->state = View::InUse;
+			ApplySettings();
+		} else if (ev == L"reset") {
+			// 가져온 화면의 초기화(새 에디터)가 끝났다
+			if (m_waitingReset) {
+				m_waitingReset = false;
+				KillTimer(kResetTimer);
+				if (m_view) m_view->state = View::InUse;
+				m_status = L"재사용한 화면 설정 중";
+				ApplySettings();
+			}
+		} else if (ev == L"resetFailed") {
+			if (m_waitingReset) RecoverCold();
+		} else if (ev == L"permissionsReady") {
+			// 메뉴·권한이 적용된 뒤에만 PB 에 Ready 를 알린다
+			if (!m_ready) {
+				m_web->ExecuteScript(L"window.__hwpxReady=true", nullptr);
+				m_ready = true;
+				m_tReady = GetTickCount64();
+				m_status = L"준비됨 (" + StartupTimes() + L")";
+				QueueEvent(1);
+			}
+		} else if (ev == L"permissionError") {
+			Fail(L"권한 초기화 실패: " + JsonString(m, L"message"));
 		} else if (ev == L"jserror") {
 			std::wstring msg = L"화면 스크립트 오류: " + JsonString(m, L"message");
 			if (m_ready) {
@@ -957,7 +1317,7 @@ private:
 			Fail(r.error);
 			return r;
 		}
-		int id = ++m_nextCallId;
+		int id = ++S().callId;  // 프로세스 전체에서 겹치지 않는 번호
 		std::wstring argList;
 		for (auto& a : args) {
 			if (!argList.empty()) argList += L",";
@@ -1042,7 +1402,12 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID reserved) {
 	return _AtlModule.DllMain(reason, reserved);
 }
 
-STDAPI DllCanUnloadNow() { return _AtlModule.DllCanUnloadNow(); }
+// 재사용을 위해 붙들고 있는 화면·환경·임시 창이 있으면 DLL 을 내리지 않는다 (타이머가 DLL 코드를 부른다)
+STDAPI DllCanUnloadNow() {
+	Shared& s = S();
+	if (s.env || s.parked || s.host || s.envCreating || s.live > 0) return S_FALSE;
+	return _AtlModule.DllCanUnloadNow();
+}
 
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv) { return _AtlModule.DllGetClassObject(rclsid, riid, ppv); }
 
