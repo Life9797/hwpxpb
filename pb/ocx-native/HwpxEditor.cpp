@@ -271,14 +271,14 @@ void ServeViewFile(View& v, ICoreWebView2WebResourceRequestedEventArgs* args) {
 	size_t cut = rel.find_first_of(L"?#");
 	if (cut != std::wstring::npos) rel = rel.substr(0, cut);
 	rel = UrlDecode(rel);
-	for (auto& ch : rel) if (ch == L'/') ch = L'\\\\';
-	if (rel.empty() || rel.back() == L'\\\\') rel += L"index.html";
+	for (auto& ch : rel) if (ch == L'/') ch = L'\\';
+	if (rel.empty() || rel.back() == L'\\') rel += L"index.html";
 	CComPtr<ICoreWebView2WebResourceResponse> response;
 	CComPtr<IStream> stream;
-	const std::wstring path = v.folder + L"\\\\" + rel;
+	const std::wstring path = v.folder + L"\\" + rel;
 	const bool bad = rel.find(L"..") != std::wstring::npos;
 	if (!bad && SUCCEEDED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream))) {
-		const std::wstring headers = std::wstring(L"Content-Type: ") + ViewMimeType(rel) + L"\\r\\nAccess-Control-Allow-Origin: *\\r\\nCache-Control: no-cache";
+		const std::wstring headers = std::wstring(L"Content-Type: ") + ViewMimeType(rel) + L"\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache";
 		v.env->CreateWebResourceResponse(stream, 200, L"OK", headers.c_str(), &response);
 	} else if (rel == L"favicon.ico") {
 		v.env->CreateWebResourceResponse(nullptr, 204, L"No Content", L"", &response);
