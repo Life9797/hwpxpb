@@ -242,6 +242,9 @@ const api = {
         // The previous editor may already have been destroyed.
       }
       state.studio = null;
+      window.__hwpxReady = false;
+      window.hwpBridgeReady = false;
+      window.__hwpxErrs = [];
       state.template = null;
       state.fileName = 'document.hwpx';
       state.mode = 'form';
