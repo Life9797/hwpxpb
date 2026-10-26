@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PB 12.1 은 32비트 → x86 고정. regasm 은 C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe (32비트) 사용 -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>HwpxEditorOcx</AssemblyName>
+    <RootNamespace>Hwpxpb</RootNamespace>
+    <ComVisible>true</ComVisible>
+    <Version>0.1.0</Version>
+    <LangVersion>latest</LangVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- WebView2Loader.dll(x86)을 출력 폴더에 함께 복사 -->
+    <WebView2LoaderPreference>Static</WebView2LoaderPreference>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.InteropServices.GuidAttribute">
+      <_Parameter1>6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A00</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+  <!-- pb/dist (scripts/build-pb-web.sh 결과)를 출력 폴더의 web\ 으로 복사 -->
+  <ItemGroup Condition="Exists('..\dist\index.html')">
+    <None Include="..\dist\**\*" LinkBase="web" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>hwpxpb 에디터</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; font: 14px/1.4 system-ui, 'Malgun Gothic', sans-serif; }
+    body { display: flex; flex-direction: column; }
+    #toolbar { display: none; flex: none; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid #d0d4da; background: #f5f6f8; }
+    body.standalone #toolbar { display: flex; }
+    #toolbar button, #toolbar select { font: inherit; padding: 4px 10px; border: 1px solid #b8bec7; border-radius: 4px; background: #fff; cursor: pointer; }
+    #toolbar button:disabled { opacity: .5; cursor: default; }
+    #toolbar .sep { width: 1px; align-self: stretch; background: #d0d4da; margin: 0 4px; }
+    #toolbar select[hidden] { display: none; }
+    #toolbar #role { color: #555; font-size: 13px; padding: 2px 8px; border-radius: 10px; background: #e8eaee; }
+    #toolbar #role:empty { display: none; }
+    #toolbar #doc-name { color: #555; margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
+    #toolbar #message { margin-left: auto; color: #b42318; }
+    #editor { flex: 1; min-height: 0; width: 100%; visibility: hidden; } /* 에디터 준비 후 보인다 (bridge.js) */
+    #keys-dialog { border: 1px solid #b8bec7; border-radius: 6px; padding: 16px 20px; max-width: 520px; }
+    #keys-dialog h3 { margin: 0 0 8px; font-size: 16px; }
+    #keys-dialog .hint { color: #555; font-size: 13px; margin: 6px 0 10px; }
+    #keys-dialog th { text-align: left; font-weight: normal; padding: 4px 12px 4px 0; white-space: nowrap; }
+    #keys-dialog input { font: inherit; width: 180px; padding: 4px 6px; border: 1px solid #b8bec7; border-radius: 4px; cursor: pointer; }
+    #keys-dialog input:focus { outline: 2px solid #1a73e8; }
+    #keys-dialog menu { display: flex; gap: 6px; justify-content: flex-end; padding: 0; margin: 12px 0 0; }
+    #keys-dialog menu button { font: inherit; padding: 4px 12px; }
+    #print-area { display: none; }
+    @media print {
+      @page { margin: 0; }
+      html, body { height: auto; overflow: visible; display: block; }
+      #toolbar, #editor { display: none !important; }
+      #print-area { display: block; }
+      /* 한 쪽 = 용지 한 장. 소수점 오차로 빈 쪽이 생기지 않게 높이를 용지에 맞춘다 */
+      #print-area > .print-page { height: 100vh; overflow: hidden; break-after: page; }
+      #print-area > .print-page:last-child { break-after: auto; }
+      #print-area svg { width: 100%; height: 100%; display: block; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 일반 브라우저에서 열었을 때만 보인다 (PB 안에서는 PB 화면이 버튼 역할) -->
+  <div id="toolbar">
+    <button id="btn-open" disabled>열기</button>
+    <input id="file-input" type="file" accept=".hwpx" hidden />
+    <!-- 편집 권한이 있을 때만 보인다. 권한이 없으면 작성(양식 입력)만 -->
+    <select id="sel-mode" disabled hidden title="작성: 칸·선택 개체만 입력 / 편집: 문서 전체를 고침">
+      <option value="form">작성 (양식 입력)</option>
+      <option value="edit">편집 (문서 전체)</option>
+    </select>
+    <span id="role" title="편집 권한은 관리자가 서버에 설정합니다"></span>
+    <span class="sep"></span>
+    <button id="btn-save" disabled title="연 파일에 그대로 저장 (Ctrl+S)">저장</button>
+    <button id="btn-save-as" disabled>다른 이름으로 저장</button>
+    <button id="btn-values" disabled title="입력값을 DB 컬럼 기준 JSON 으로 저장">값 저장(JSON)</button>
+    <button id="btn-print" disabled title="인쇄 대화상자에서 프린터 또는 PDF 로 저장을 고릅니다">인쇄 / PDF</button>
+    <span class="sep"></span>
+    <button id="btn-keys" disabled title="양식 입력에서 칸·선택 개체 사이를 옮겨 다닐 키">이동 키 설정</button>
+    <span id="doc-name"></span>
+    <span id="message"></span>
+  </div>
+  <dialog id="keys-dialog">
+    <form method="dialog">
+      <h3>이동 키 설정</h3>
+      <p class="hint">칸을 누른 다음 쓸 키를 누르세요. 지우려면 Backspace 를 누릅니다.<br />
+        선택 개체(체크박스·라디오·드롭다운)로 옮긴 뒤 Space 또는 Enter 로 체크·선택하고, 드롭다운 목록은 ↑↓ 와 Enter 로 고릅니다.</p>
+      <table>
+        <tr><th>다음 선택 개체</th><td><input data-key="nextObject" readonly /></td></tr>
+        <tr><th>이전 선택 개체</th><td><input data-key="prevObject" readonly /></td></tr>
+        <tr><th>다음 누름틀</th><td><input data-key="nextField" readonly /></td></tr>
+        <tr><th>이전 누름틀</th><td><input data-key="prevField" readonly /></td></tr>
+      </table>
+      <p class="hint">Chrome·Edge 같은 브라우저에서는 Ctrl+Tab 이 탭 전환에 먼저 쓰여 동작하지 않습니다. 브라우저에서는 F8 같은 다른 키를 권합니다 (PB 화면에서는 Ctrl+Tab 그대로 됩니다).</p>
+      <menu>
+        <button type="button" id="keys-default">기본값</button>
+        <button value="cancel">취소</button>
+        <button value="ok" id="keys-ok">저장</button>
+      </menu>
+    </form>
+  </dialog>
+  <div id="editor"></div>
+  <div id="print-area"></div>
+  <script type="importmap">{ "imports": { "fflate": "./vendor/fflate/browser.js" } }</script>
+  <script type="module" src="./bridge.js"></script>
+  <script type="module" src="./standalone.js"></script>
+</body>
+</html>

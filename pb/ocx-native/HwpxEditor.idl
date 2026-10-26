@@ -1,0 +1,81 @@
+// HWPX 에디터 OLE 컨트롤 (C++/ATL, .NET 불필요). pb/ocx (.NET 판) 과 같은 CLSID·ProgID·메서드를 쓴다.
+import "oaidl.idl";
+import "ocidl.idl";
+
+[
+	object,
+	uuid(6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A01),
+	dual,
+	nonextensible,
+	oleautomation,
+	pointer_default(unique)
+]
+interface IHwpxEditor : IDispatch
+{
+	[id(1)] HRESULT Open([in] BSTR path, [in] BSTR mode, [out, retval] VARIANT_BOOL* result);
+	[id(2)] HRESULT OpenBase64([in] BSTR base64, [in] BSTR fileName, [in] BSTR mode, [out, retval] VARIANT_BOOL* result);
+	[id(3)] HRESULT SetMode([in] BSTR mode, [out, retval] VARIANT_BOOL* result);
+	[id(4)] HRESULT GetSchema([out, retval] BSTR* result);
+	[id(5)] HRESULT SetFields([in] BSTR valuesJson, [in] BSTR comboSep, [out, retval] BSTR* result);
+	[id(6)] HRESULT GetFields([in] BSTR comboSep, [out, retval] BSTR* result);
+	[id(7)] HRESULT SaveAs([in] BSTR path, [in] BSTR comboSep, [out, retval] VARIANT_BOOL* result);
+	[id(8)] HRESULT GetDocumentBase64([in] BSTR comboSep, [out, retval] BSTR* result);
+	[id(9)] HRESULT SavePdf([in] BSTR path, [out, retval] VARIANT_BOOL* result);
+	[id(10), propget] HRESULT LastError([out, retval] BSTR* value);
+	[id(11), propget] HRESULT IsReady([out, retval] VARIANT_BOOL* value);
+	[id(12), propget] HRESULT TimeoutSeconds([out, retval] long* value);
+	[id(12), propput] HRESULT TimeoutSeconds([in] long value);
+	[id(13), propget] HRESULT WebFolder([out, retval] BSTR* value);
+	[id(13), propput] HRESULT WebFolder([in] BSTR value);
+	[id(14), propget] HRESULT PdfLandscape([out, retval] VARIANT_BOOL* value);
+	[id(14), propput] HRESULT PdfLandscape([in] VARIANT_BOOL value);
+	[id(15), propget] HRESULT AllowEdit([out, retval] VARIANT_BOOL* value);
+	[id(15), propput] HRESULT AllowEdit([in] VARIANT_BOOL value);
+	[id(20)] HRESULT GetFieldValue([in] BSTR column, [in] BSTR comboSep, [out, retval] BSTR* result);
+	[id(21)] HRESULT SetFieldValue([in] BSTR column, [in] BSTR value, [in] BSTR comboSep, [out, retval] VARIANT_BOOL* result);
+	[id(22)] HRESULT GetFieldsTsv([in] BSTR comboSep, [out, retval] BSTR* result);
+	[id(23)] HRESULT GetTable([out, retval] BSTR* result);
+	[id(24)] HRESULT Print([out, retval] VARIANT_BOOL* result);
+	[id(25)] HRESULT PrintTo([in] BSTR printerName, [in] long copies, [out, retval] VARIANT_BOOL* result);
+	[id(26)] HRESULT GetPrinters([out, retval] BSTR* result);
+	[id(27)] HRESULT GetDefaultPrinter([out, retval] BSTR* result);
+	[id(28)] HRESULT SetKeys([in] BSTR nextObject, [in] BSTR prevObject, [in] BSTR nextField, [in] BSTR prevField, [out, retval] VARIANT_BOOL* result);
+	[id(29)] HRESULT MoveObject([in] long delta, [out, retval] VARIANT_BOOL* result);
+	[id(30), propget] HRESULT Status([out, retval] BSTR* value);
+	[id(31), propget] HRESULT BrowserVersion([out, retval] BSTR* value);
+	[id(32), propget] HRESULT ShowMenu([out, retval] VARIANT_BOOL* value);
+	[id(32), propput] HRESULT ShowMenu([in] VARIANT_BOOL value);
+	[id(33)] HRESULT GetColumns([in] BSTR order, [out, retval] BSTR* result);
+	[id(34), propget] HRESULT StartupTimes([out, retval] BSTR* value);
+};
+
+[
+	uuid(6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A00),
+	version(1.0),
+	helpstring("hwpxpb HWPX editor control")
+]
+library HwpxpbLib
+{
+	importlib("stdole2.tlb");
+
+	[uuid(6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A02)]
+	dispinterface IHwpxEditorEvents
+	{
+	properties:
+	methods:
+		[id(1)] void Ready();
+		[id(2)] void Loaded([in] BSTR fileName, [in] BSTR table);
+		[id(3)] void ErrorOccurred([in] BSTR message);
+	};
+
+	[
+		uuid(6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03),
+		control,
+		helpstring("HwpxEditorControl")
+	]
+	coclass HwpxEditorControl
+	{
+		[default] interface IHwpxEditor;
+		[default, source] dispinterface IHwpxEditorEvents;
+	};
+};

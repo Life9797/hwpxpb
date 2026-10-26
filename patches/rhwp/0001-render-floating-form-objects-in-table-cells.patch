@@ -1,0 +1,108 @@
+diff --git a/src/renderer/layout/shape_layout.rs b/src/renderer/layout/shape_layout.rs
+index 06ac2fa2..03ccbb90 100644
+--- a/src/renderer/layout/shape_layout.rs
++++ b/src/renderer/layout/shape_layout.rs
+@@ -4399,6 +4399,61 @@ impl LayoutEngine {
+ 
+     /// [#6266] 양식 개체의 좌상단 좌표 — `calc_shape_bottom_y` 와
+     /// `check_horizontal_overlap` 이 쓰는 것과 같은 기준·정렬 산식이다.
++    /// [hwpxpb] 표 셀 안 비-TAC 양식 개체(체크박스 등)를 셀 영역 기준 자기 배치로 놓는다.
++    /// 본문용 경로(`layout_shape`)와 같은 노드를 만들되, 기준 영역이 셀 안쪽이다.
++    #[allow(clippy::too_many_arguments)]
++    pub(crate) fn layout_cell_form_object(
++        &self,
++        tree: &mut PageLayoutContext,
++        parent: &mut RenderNode,
++        form: &crate::model::control::FormObject,
++        para: &Paragraph,
++        cell_area: &LayoutRect,
++        anchor_y: f64,
++        styles: &ResolvedStyleSet,
++        section_index: usize,
++        para_index: usize,
++        control_index: usize,
++        cell_location: Option<(usize, usize, usize, usize)>,
++    ) {
++        let (form_x, form_y) =
++            self.form_object_origin(&form.common, cell_area, cell_area, cell_area, anchor_y);
++        let form_w = hwpunit_to_px(form.common.width.max(form.width) as i32, self.dpi);
++        let form_h = hwpunit_to_px(form.common.height.max(form.height) as i32, self.dpi);
++        let form_node = RenderNode::new(
++            tree.next_id(),
++            RenderNodeType::FormObject(FormObjectNode {
++                form_type: form.form_type,
++                caption: form.caption.clone(),
++                text: form.text.clone(),
++                display_text: FormObjectNode::form_display_text(form),
++                appearance: crate::renderer::form_appearance::FormAppearance::resolve(
++                    form,
++                    styles,
++                    para.char_shape_id_at(
++                        para.logical_control_positions()
++                            .get(control_index)
++                            .copied()
++                            .unwrap_or(0),
++                    )
++                    .unwrap_or(0),
++                    self.dpi,
++                ),
++                fore_color: super::paragraph_layout::form_color_to_css(form.fore_color),
++                back_color: super::paragraph_layout::form_color_to_css(form.back_color),
++                value: form.value,
++                enabled: form.enabled,
++                section_index,
++                para_index,
++                control_index,
++                name: form.name.clone(),
++                cell_location,
++            }),
++            BoundingBox::new(form_x, form_y, form_w, form_h),
++        );
++        parent.children.push(form_node);
++    }
++
+     fn form_object_origin(
+         &self,
+         common: &CommonObjAttr,
+diff --git a/src/renderer/layout/table_layout.rs b/src/renderer/layout/table_layout.rs
+index 53604442..462f4e9a 100644
+--- a/src/renderer/layout/table_layout.rs
++++ b/src/renderer/layout/table_layout.rs
+@@ -8160,6 +8160,37 @@ impl LayoutEngine {
+                         }
+                         has_preceding_text = true;
+                     }
++                    // [hwpxpb] 셀 안 비-TAC 양식 개체 — 종전에는 그려지지 않았다.
++                    Control::Form(form) if !form.common.treat_as_char => {
++                        let anchor_y = if matches!(form.common.vert_rel_to, VertRelTo::Para) {
++                            para_y_before_compose
++                        } else {
++                            inner_area.y
++                        };
++                        let cell_location = cell_context.as_ref().and_then(|ctx| {
++                            ctx.path.first().map(|e| {
++                                (
++                                    ctx.parent_para_index,
++                                    e.control_index,
++                                    e.cell_index,
++                                    e.cell_para_index,
++                                )
++                            })
++                        });
++                        self.layout_cell_form_object(
++                            tree,
++                            cell_node,
++                            form,
++                            para,
++                            &inner_area,
++                            anchor_y,
++                            styles,
++                            section_index,
++                            cp_idx,
++                            ctrl_idx,
++                            cell_location,
++                        );
++                    }
+                     _ => {}
+                 }
+             }
