@@ -7,7 +7,9 @@
 1. 압축을 원하는 폴더에 풉니다. 예: C:\hwpxpb
    (등록 후에는 폴더를 옮기지 마세요. 옮겼다면 unregister.bat → 새 위치에서 register.bat)
 2. .NET 판을 등록했던 PC 라면 먼저 그 폴더의 unregister.bat 을 실행합니다.
-3. register.bat 을 마우스 오른쪽 → "관리자 권한으로 실행". "DllRegisterServer 성공" 이 뜨면 됩니다.
+3. register.bat 을 실행합니다 (더블클릭하면 관리자 권한을 스스로 요청합니다. 안 되면 마우스 오른쪽 → "관리자 권한으로 실행").
+   "[OK] HwpxEditor.ocx registered" 가 뜨면 됩니다. 실패하면 오류 코드와 regsvr32 메시지를 보여 줍니다.
+   압축 파일 안에서 바로 실행하지 말고, 먼저 압축을 푼 폴더에서 실행하세요.
 4. Microsoft Edge WebView2 런타임이 필요합니다.
    - Windows 10/11: 대부분 이미 설치되어 있습니다.
    - Windows 7 SP1: WebView2 는 109 버전이 마지막입니다. 109 런타임을 설치하거나,
