@@ -36,6 +36,55 @@ Open(w_hwpx_demo)
 - **편집 권한**은 예제의 체크박스 대신 사용자 권한으로 정합니다: `iole.object.AllowEdit = (gs_user_role = "ADMIN")`
 - 준비 확인은 `ready` 이벤트 대신 타이머로 `IsReady` 를 봅니다. `ready` 이벤트를 쓰려면 컨트롤의 ready 이벤트에 `Parent.PostEvent("ue_ready")` 를 넣고 타이머를 빼면 됩니다.
 
+## Windows 7 / Windows 10 에 맞는 OCX 쓰기
+Windows 7 과 Windows 10/11 PC 가 섞여 있을 때, 프로그램과 함께 두 판을 배포하고 PC 에 맞는 것을 등록해 씁니다.
+
+| PC | 폴더 | zip | WebView2 |
+|---|---|---|---|
+| Windows 7 SP1 / 8.1 | `C:\hwpxpb\win7\` | `HwpxEditor-native-win7.zip` | 함께 든 109 고정 버전 (`webview2\`) |
+| Windows 10 / 11 | `C:\hwpxpb\win10\` | `HwpxEditor-native.zip` | PC 에 설치된 최신 런타임 |
+
+두 판은 CLSID·ProgID(`Hwpxpb.Editor`)·메서드가 같습니다. 그래서 **PB 화면과 코드는 하나**이고, 한 PC 에는 둘 중 하나만 등록됩니다.
+어느 OCX 가 불리는지는 등록된 경로로 정해집니다.
+
+Windows 판별: `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion` 에 `CurrentMajorVersionNumber` 가 있으면 Windows 10/11, 없으면 Windows 7/8.1 입니다.
+(PB 12.1 의 `GetEnvironment()` 는 Windows 10 도 6.2 로 보여 주므로 쓰지 않습니다.)
+
+### 방법 1. 설치할 때 등록: `install-by-os.bat`
+`C:\hwpxpb\install-by-os.bat` 로 두고 실행하면 Windows 판을 보고 `win7\register.bat` 또는 `win10\register.bat` 을 부릅니다.
+`install-by-os.bat win7` 처럼 판을 직접 줄 수도 있습니다.
+
+### 방법 2. 프로그램이 확인: `n_hwpx_ocx.sru`
+Import 로 `n_hwpx_ocx.sru` 를 가져오고, **OCX 가 든 창을 열기 전에** 부릅니다.
+맞는 OCX 가 등록되어 있지 않으면 그 폴더의 `register.bat` 을 실행하고(UAC 확인), 등록될 때까지 기다립니다.
+
+```powerscript
+// application open 이벤트 또는 창을 여는 버튼에서
+n_hwpx_ocx lnv_ocx
+lnv_ocx.is_root = "C:\hwpxpb"   // win7\, win10\ 이 있는 폴더 (기본값)
+
+If lnv_ocx.of_ensure_registered() <> 1 Then
+	MessageBox("HWPX 에디터", lnv_ocx.is_error, StopSign!)
+	Return
+End If
+// lnv_ocx.of_os_name()        → "win7" / "win10"
+// lnv_ocx.of_registered_path() → 지금 등록된 OCX 경로
+Open(w_hwpx_demo)
+```
+
+| 함수 | 돌려주는 값 |
+|---|---|
+| `of_is_win7()` | Windows 7/8.1 이면 true |
+| `of_os_name()` | `"win7"` / `"win10"` |
+| `of_ocx_path()` | 이 PC 에 맞는 OCX 경로 (`is_root\win7\HwpxEditor.ocx` 등) |
+| `of_registered_path()` | 지금 등록된 OCX 경로 (없으면 `""`) |
+| `of_ensure_registered()` | `1` 맞는 OCX 가 등록됨, `-1` 폴더·파일 없음, `-2` 등록 실패·시간 초과 (`is_error`) |
+
+참고
+- 창이 열린 뒤에 등록을 바꾸면 그 창에는 반영되지 않습니다. 반드시 창을 열기 전에 확인합니다.
+- 프로그램 폴더 아래에 두려면 `is_root = GetCurrentDirectory() + "\hwpxpb"` 처럼 바꿉니다. 등록 후에는 폴더를 옮기지 마세요.
+- .NET 판(`HwpxEditorOcx.zip`)을 등록했던 PC 는 먼저 그 폴더의 `unregister.bat` 을 실행합니다.
+
 ## 값 규칙 (요약)
 - 누름틀·드롭다운·단독 체크박스: 개체 이름 = 컬럼. 체크박스 값 `Y`/`N`
 - 다중 체크박스 `컬럼__코드` → 값 `01,02`, 라디오 그룹 = 컬럼, 고른 버튼 이름 = 값
@@ -43,4 +92,4 @@ Open(w_hwpx_demo)
 
 자세한 메서드 설명은 [PB 가이드](../../docs/pb-guide.md).
 
-이 파일은 손으로 작성한 PB 내보내기 형식(cp949)입니다. 가져오기에서 오류가 나면 메시지를 알려 주세요.
+`.srw`·`.sru` 파일은 손으로 작성한 PB 내보내기 형식(cp949)입니다. 가져오기에서 오류가 나면 메시지를 알려 주세요.

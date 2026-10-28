@@ -43,6 +43,11 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 - WebView2 런타임은 Windows 7 에서 **109** 가 마지막 버전입니다. 에디터 화면은 109 에서 쓰는 기능만 씁니다 (배포본의 JS 를 검사함, 실제 Win7 시험은 아직 안 함).
 - 런타임을 PC 마다 설치하지 않으려면 109 **고정 버전(Fixed Version) x86** 런타임을 설치 폴더의 `webview2\` 에 풀어 둡니다. OCX 는 `webview2\msedgewebview2.exe` 가 있으면 그것을 씁니다.
 
+### Windows 7 과 Windows 10 PC 가 섞여 있을 때
+`win7\`(HwpxEditor-native-win7.zip)과 `win10\`(HwpxEditor-native.zip)을 함께 배포하고, PC 의 Windows 에 맞는 쪽을 등록합니다.
+설치 때는 `examples/pb/install-by-os.bat`, 프로그램 안에서는 `examples/pb/n_hwpx_ocx.sru` 의 `of_ensure_registered()` 를 씁니다.
+두 판은 ProgID·메서드가 같아 PB 코드는 하나입니다. 자세한 내용은 [예제 README](../examples/pb/README.md#windows-7--windows-10-에-맞는-ocx-쓰기).
+
 ## 3. PB 화면에 넣기
 창 페인터 → Insert → OLE → **Insert Control** 탭 → `HwpxEditorControl` (ProgID `Hwpxpb.Editor`) 선택.
 컨트롤 이름을 `ole_hwp` 로 둡니다. 이벤트 목록에 `ready`, `loaded`, `erroroccurred` 가 생깁니다.
