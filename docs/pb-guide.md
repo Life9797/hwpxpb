@@ -62,7 +62,8 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `GetFieldsTsv(comboSep)` | 모든 값 `컬럼<TAB>값` 줄 목록 → DataWindow `ImportString` |
 | `SetFields(json, comboSep)` | 여러 값을 JSON 으로 한 번에. 결과 JSON `{applied, unknown, rejected}` |
 | `GetFields(comboSep)` | 모든 값 JSON `{"table":..,"values":{..}}` |
-| `GetTable()` | 문서 정보에 적은 `dbtable=` 값 |
+| `GetTable()` | 열려 있는 문서의 문서 정보에 적은 `dbtable=` 값 |
+| `GetTableFromFile(path)` | 에디터에 열지 않고 파일의 `dbtable=` 값만 읽기. 열려 있는 문서는 그대로. 읽지 못하면 `""` 와 `LastError` |
 | `GetSchema()` | 개체 목록 JSON |
 | `SaveAs(path, comboSep)` | HWPX 로 저장. form 모드에서는 원본 양식에 값만 다시 넣어 저장하므로 서식이 바뀌지 않음 |
 | `SavePdf(path)` | PDF 로 저장 |
@@ -73,6 +74,8 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `SetKeys(nextObject, prevObject, nextField, prevField)` | 양식 입력에서 옮겨 다닐 키. `""` 는 그대로, `"none"` 은 끔 (아래 8절) |
 | `MoveObject(delta)` | 다음(1)/이전(-1) 선택 개체로 이동. 버튼 등에서 부를 때 |
 | `SetMode(mode)` | 모드 바꾸기 (`edit` 는 AllowEdit 가 true 일 때만) |
+| `SetEditMode(edit)` | `true` 면 편집(`edit`, **AllowEdit 필요**), `false` 면 작성(`form`). 성공하면 true |
+| `GetMode()` | 지금 모드 `form` / `edit` / `view` |
 | `LastError` | 마지막 오류 메시지 |
 | `IsReady` | 에디터 준비 여부 (`ready` 이벤트 이후 true) |
 | `Status` | (C++ 판) 지금 단계. `IsReady` 가 계속 false 일 때 어디서 멈췄는지 보여 줌 (런타임 없음, web 폴더 없음, 화면 오류 등) |
@@ -95,6 +98,8 @@ ole_hwp.object.AllowEdit = (gs_user_role = "ADMIN")
 ddlb_mode.Visible = ole_hwp.object.AllowEdit
 ...
 ole_hwp.object.SetMode("edit")    // 권한이 없으면 false
+ole_hwp.object.SetEditMode(true)  // 위와 같음. false 면 작성으로
+ls_mode = string(ole_hwp.object.GetMode())   // form / edit / view
 ```
 
 ## 5. 값 규칙 (양식 만들 때)

@@ -227,6 +227,11 @@ const api = {
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
+  /** 에디터에 열지 않고 파일(base64)의 테이블명만 읽는다 */
+  async tableOf(b64) {
+    return { ok: true, table: new HwpxDocument(fromB64(b64)).dbTable };
+  },
+
   /**
    * 화면을 처음 상태로 되돌린다. OCX 가 창을 닫을 때 부르고, 이 화면을 다음 창에서 다시 쓴다.
    * 이전 문서·권한·메뉴·키 설정을 모두 비우고 에디터를 새로 만든다 (이전 문서가 남지 않는다).

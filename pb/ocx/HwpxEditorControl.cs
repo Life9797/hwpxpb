@@ -48,6 +48,12 @@ namespace Hwpxpb
         [DispId(22)] string GetFieldsTsv(string comboSep);
         [DispId(23)] string GetTable();
         [DispId(33)] string GetColumns(string order);
+        // 에디터에 열지 않고 파일의 테이블명만 읽는다
+        [DispId(35)] string GetTableFromFile(string path);
+        // true = 편집(edit, AllowEdit 필요), false = 작성(form)
+        [DispId(36)] bool SetEditMode(bool edit);
+        // 지금 모드: form | edit | view
+        [DispId(37)] string GetMode();
         // 출력 (빈 칸 안내문은 찍지 않는다)
         [DispId(24)] bool Print();
         [DispId(25)] bool PrintTo(string printerName, int copies);
@@ -257,6 +263,24 @@ namespace Hwpxpb
         {
             var r = Parse(GetSchema());
             return r != null && r.TryGetValue("table", out var t) ? t as string ?? "" : "";
+        }
+
+        /// <summary>에디터에 열지 않고 파일의 테이블명(dbtable=)만 읽는다. 열려 있는 문서는 그대로.</summary>
+        public string GetTableFromFile(string path)
+        {
+            string b64;
+            try { b64 = Convert.ToBase64String(File.ReadAllBytes(path)); }
+            catch (Exception ex) { Fail(ex.Message); return ""; }
+            var r = Parse(Call("tableOf", b64));
+            return r != null && r.TryGetValue("table", out var t) ? t as string ?? "" : "";
+        }
+
+        public bool SetEditMode(bool edit) => SetMode(edit ? "edit" : "form");
+
+        public string GetMode()
+        {
+            var r = Parse(Call("getPermission"));
+            return r != null && r.TryGetValue("mode", out var m) ? m as string ?? "" : "";
         }
 
         private Dictionary<string, object> Values(string fieldsJson)

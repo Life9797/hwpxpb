@@ -708,6 +708,29 @@ public:
 		return Ret(result, r.ok ? r.payload : L"");
 	}
 
+	/** 에디터에 열지 않고 파일의 테이블명(dbtable=)만 읽는다. 열려 있는 문서는 그대로 */
+	STDMETHOD(GetTableFromFile)(BSTR path, BSTR* result) {
+		std::vector<BYTE> data;
+		std::wstring err;
+		if (!ReadAll(Str(path), data, err)) {
+			Fail(err);
+			return Ret(result, L"");
+		}
+		Result r = Call(L"tableOf", {Js(ToBase64(data))}, L"function(o){return o.table||''}");
+		return Ret(result, r.ok ? r.payload : L"");
+	}
+
+	/** true = 편집(edit, AllowEdit 필요), false = 작성(form). SetMode("edit"/"form") 과 같다 */
+	STDMETHOD(SetEditMode)(VARIANT_BOOL edit, VARIANT_BOOL* result) {
+		return Ret(result, Call(L"setMode", {Js(edit != VARIANT_FALSE ? L"edit" : L"form")}).ok);
+	}
+
+	/** 지금 모드: form | edit | view */
+	STDMETHOD(GetMode)(BSTR* result) {
+		Result r = Call(L"getPermission", {}, L"function(o){return o.mode||''}");
+		return Ret(result, r.ok ? r.payload : L"");
+	}
+
 	/** 인쇄 대화상자(미리보기)를 띄운다. 프린터·매수·쪽 범위는 사용자가 고른다 */
 	STDMETHOD(Print)(VARIANT_BOOL* result) {
 		if (!Call(L"preparePrint", {}).ok) return Ret(result, false);
