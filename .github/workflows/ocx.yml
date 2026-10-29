@@ -66,6 +66,19 @@ jobs:
           if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
           Get-ChildItem $d | Format-Table Name, Length
           Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditor-native.zip
+      - name: register.bat / unregister.bat 실행 확인
+        # 러너는 관리자 권한이라 UAC 없이 돈다. pause 는 빈 입력으로 넘긴다
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $d = "out\HwpxEditor-native"
+          $clsid = "Registry::HKEY_CLASSES_ROOT\WOW6432Node\CLSID\{6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03}\InprocServer32"
+          "" | cmd /c "$d\register.bat"
+          if ($LASTEXITCODE -ne 0) { throw "register.bat exit $LASTEXITCODE" }
+          if (!(Test-Path "Registry::HKEY_CLASSES_ROOT\Hwpxpb.Editor\CLSID")) { throw "ProgID Hwpxpb.Editor 가 등록되지 않음" }
+          Write-Output "::notice::InprocServer32 = $((Get-ItemProperty $clsid).'(default)')"
+          "" | cmd /c "$d\unregister.bat"
+          if (Test-Path "Registry::HKEY_CLASSES_ROOT\Hwpxpb.Editor") { throw "unregister.bat 후에도 ProgID 가 남아 있음" }
       - name: Windows 7 용 zip (WebView2 109 고정 버전 x86 포함)
         shell: pwsh
         run: |
@@ -118,6 +131,14 @@ jobs:
           if (!(Test-Path "$d/web/index.html")) { throw "web/index.html 없음" }
           Get-ChildItem $d | Format-Table Name, Length
           Compress-Archive -Path "$d/*" -DestinationPath out/HwpxEditorOcx.zip
+      - name: register.bat 실행 확인
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          "" | cmd /c "out\HwpxEditorOcx\register.bat"
+          if ($LASTEXITCODE -ne 0) { throw "register.bat exit $LASTEXITCODE" }
+          if (!(Test-Path "Registry::HKEY_CLASSES_ROOT\Hwpxpb.Editor\CLSID")) { throw "ProgID Hwpxpb.Editor 가 등록되지 않음" }
+          "" | cmd /c "out\HwpxEditorOcx\unregister.bat"
       - uses: actions/upload-artifact@v4
         with:
           name: HwpxEditorOcx

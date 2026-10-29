@@ -222,6 +222,7 @@ namespace {
 
 struct View {
 	enum State { Starting, InUse, Resetting, Parked };
+	CComPtr<ICoreWebView2Environment> env;
 	CComPtr<ICoreWebView2Controller> controller;
 	CComPtr<ICoreWebView2> web;
 	std::wstring folder;           // 이 화면을 연 web 폴더
@@ -237,10 +238,65 @@ struct View {
 	}
 };
 
+const wchar_t* ViewMimeType(const std::wstring& path) {
+	size_t dot = path.find_last_of(L'.');
+	std::wstring ext = dot == std::wstring::npos ? L"" : Lower(path.substr(dot));
+	if (ext == L".html") return L"text/html; charset=utf-8";
+	if (ext == L".js" || ext == L".mjs") return L"text/javascript; charset=utf-8";
+	if (ext == L".css") return L"text/css; charset=utf-8";
+	if (ext == L".wasm") return L"application/wasm";
+	if (ext == L".json") return L"application/json";
+	if (ext == L".webmanifest") return L"application/manifest+json";
+	if (ext == L".svg") return L"image/svg+xml";
+	if (ext == L".png") return L"image/png";
+	if (ext == L".ico") return L"image/x-icon";
+	if (ext == L".woff2") return L"font/woff2";
+	if (ext == L".woff") return L"font/woff";
+	if (ext == L".ttf") return L"font/ttf";
+	if (ext == L".txt") return L"text/plain; charset=utf-8";
+	return L"application/octet-stream";
+}
+
+// Parked views still need to serve local assets while no OCX instance owns them.
+void ServeViewFile(View& v, ICoreWebView2WebResourceRequestedEventArgs* args) {
+	if (!v.env || v.folder.empty()) return;
+	CComPtr<ICoreWebView2WebResourceRequest> request;
+	LPWSTR uri = nullptr;
+	if (FAILED(args->get_Request(&request)) || !request || FAILED(request->get_Uri(&uri)) || !uri) return;
+	std::wstring u = uri;
+	CoTaskMemFree(uri);
+	const std::wstring prefix = std::wstring(L"https://") + kHost + L"/";
+	if (u.compare(0, prefix.size(), prefix) != 0) return;
+	std::wstring rel = u.substr(prefix.size());
+	size_t cut = rel.find_first_of(L"?#");
+	if (cut != std::wstring::npos) rel = rel.substr(0, cut);
+	rel = UrlDecode(rel);
+	for (auto& ch : rel) if (ch == L'/') ch = L'\\';
+	if (rel.empty() || rel.back() == L'\\') rel += L"index.html";
+	CComPtr<ICoreWebView2WebResourceResponse> response;
+	CComPtr<IStream> stream;
+	const std::wstring path = v.folder + L"\\" + rel;
+	const bool bad = rel.find(L"..") != std::wstring::npos;
+	if (!bad && SUCCEEDED(SHCreateStreamOnFileEx(path.c_str(), STGM_READ | STGM_SHARE_DENY_WRITE, FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream))) {
+		const std::wstring headers = std::wstring(L"Content-Type: ") + ViewMimeType(rel) + L"\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-cache";
+		v.env->CreateWebResourceResponse(stream, 200, L"OK", headers.c_str(), &response);
+	} else if (rel == L"favicon.ico") {
+		v.env->CreateWebResourceResponse(nullptr, 204, L"No Content", L"", &response);
+	} else {
+		v.broken = true;
+		v.env->CreateWebResourceResponse(nullptr, 404, L"Not Found", L"Content-Type: text/plain", &response);
+	}
+	if (response) args->put_Response(response);
+}
+
 using EnvDone = std::function<void(HRESULT, ICoreWebView2Environment*)>;
 
 struct Shared {
 	CComPtr<ICoreWebView2Environment> env;
+	std::wstring dataDir;
+	std::wstring fixedDir;
+	bool useFixed = false;
+	bool configSet = false;
 	DWORD thread = 0;  // env 와 보관 화면을 쓰는 스레드 (STA 라서 다른 스레드에서는 쓰지 않는다)
 	bool envCreating = false;
 	std::vector<EnvDone> waiters;
@@ -319,6 +375,18 @@ HWND EnsureHost() {
 void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstring& dataDir, EnvDone done) {
 	Shared& s = S();
 	DWORD me = GetCurrentThreadId();
+	if (Reuse() && (s.env || s.envCreating || s.parked)) {
+		if (s.thread != me) {
+			done(RPC_E_WRONG_THREAD, nullptr);
+			return;
+		}
+		if (s.configSet && (s.useFixed != useFixed ||
+			_wcsicmp(s.fixedDir.c_str(), fixedDir.c_str()) != 0 ||
+			_wcsicmp(s.dataDir.c_str(), dataDir.c_str()) != 0)) {
+			done(E_INVALIDARG, nullptr);
+			return;
+		}
+	}
 	bool share = Reuse() && (s.thread == me || (!s.env && !s.envCreating && !s.parked));
 	if (share) {
 		s.thread = me;
@@ -332,6 +400,10 @@ void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstr
 			return;
 		}
 		s.envCreating = true;
+		s.dataDir = dataDir;
+		s.fixedDir = fixedDir;
+		s.useFixed = useFixed;
+		s.configSet = true;
 		s.lastUse = GetTickCount64();
 		s.waiters.push_back(done);
 		EnsureHost();
@@ -367,7 +439,8 @@ void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstr
 // 창을 닫을 때 보관하는 화면에 보내는 초기화 (에디터를 새로 만들고 이전 문서·권한을 비운다)
 const wchar_t* const kResetScript =
 	L"window.hwpBridge.reset().then(function(s){var o=null;try{o=JSON.parse(s);}catch(e){}"
-	L"window.chrome.webview.postMessage(JSON.stringify({event:(o&&o.ok)?'reset':'resetFailed',message:String((o&&o.error)||'')}));});";
+	L"window.chrome.webview.postMessage(JSON.stringify({event:(o&&o.ok)?'reset':'resetFailed',message:String((o&&o.error)||'')}));})"
+	L".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'resetFailed',message:String(e&&e.message||e)}));});";
 
 }  // namespace
 
@@ -632,6 +705,29 @@ public:
 
 	STDMETHOD(GetTable)(BSTR* result) {
 		Result r = Call(L"getSchema", {}, L"function(o){return o.table||''}");
+		return Ret(result, r.ok ? r.payload : L"");
+	}
+
+	/** 에디터에 열지 않고 파일의 테이블명(dbtable=)만 읽는다. 열려 있는 문서는 그대로 */
+	STDMETHOD(GetTableFromFile)(BSTR path, BSTR* result) {
+		std::vector<BYTE> data;
+		std::wstring err;
+		if (!ReadAll(Str(path), data, err)) {
+			Fail(err);
+			return Ret(result, L"");
+		}
+		Result r = Call(L"tableOf", {Js(ToBase64(data))}, L"function(o){return o.table||''}");
+		return Ret(result, r.ok ? r.payload : L"");
+	}
+
+	/** true = 편집(edit, AllowEdit 필요), false = 작성(form). SetMode("edit"/"form") 과 같다 */
+	STDMETHOD(SetEditMode)(VARIANT_BOOL edit, VARIANT_BOOL* result) {
+		return Ret(result, Call(L"setMode", {Js(edit != VARIANT_FALSE ? L"edit" : L"form")}).ok);
+	}
+
+	/** 지금 모드: form | edit | view */
+	STDMETHOD(GetMode)(BSTR* result) {
+		Result r = Call(L"getPermission", {}, L"function(o){return o.mode||''}");
 		return Ret(result, r.ok ? r.payload : L"");
 	}
 
@@ -928,10 +1024,26 @@ private:
 		m_folder = v->folder;
 		m_reused = true;
 		m_tController = m_tPage = GetTickCount64();
-		m_controller->put_ParentWindow(m_hWnd);
+		HRESULT parentHr = m_controller->put_ParentWindow(m_hWnd);
+		if (FAILED(parentHr)) {
+			m_view->Destroy();
+			m_view.reset();
+			m_controller.Release();
+			m_web.Release();
+			m_reused = false;
+			return false;
+		}
 		Resize();
-		m_controller->put_IsVisible(TRUE);
-		m_controller->NotifyParentWindowPositionChanged();
+		HRESULT visibleHr = m_controller->put_IsVisible(TRUE);
+		HRESULT notifyHr = m_controller->NotifyParentWindowPositionChanged();
+		if (FAILED(visibleHr) || FAILED(notifyHr)) {
+			m_view->Destroy();
+			m_view.reset();
+			m_controller.Release();
+			m_web.Release();
+			m_reused = false;
+			return false;
+		}
 		if (v->state == View::Parked) {
 			v->state = View::InUse;
 			m_status = L"재사용한 화면 설정 중";
@@ -1066,6 +1178,7 @@ private:
 					m_tController = GetTickCount64();
 					m_controller->get_CoreWebView2(&m_web);
 					m_view = std::make_shared<View>();
+					m_view->env = m_env;
 					m_view->controller = m_controller;
 					m_view->web = m_web;
 					m_view->owner = this;
@@ -1105,8 +1218,10 @@ private:
 		m_web->add_WebResourceRequested(
 			Callback<ICoreWebView2WebResourceRequestedEventHandler>(
 				[wv](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
-					if (auto v = wv.lock())
+					if (auto v = wv.lock()) {
 						if (v->owner) v->owner->ServeFile(args);
+						else ServeViewFile(*v, args);
+					}
 					return S_OK;
 				}).Get(),
 			&token);

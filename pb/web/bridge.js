@@ -21,6 +21,7 @@ const state = {
   mode: 'form', // form | edit | view
   allowEdit: false, // 문서 전체 편집 권한 (PB 는 OCX AllowEdit, 브라우저는 서버 /api/permission)
   showMenu: false, // 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지 (OCX ShowMenu)
+  resetInProgress: false,
 };
 
 /** 메뉴·도구 모음: 권한 없는 사용자는 항상 숨김. 권한자는 편집 모드에서, ShowMenu 면 작성 모드에서도 보인다 */
@@ -226,25 +227,54 @@ const api = {
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
+  /** 에디터에 열지 않고 파일(base64)의 테이블명만 읽는다 */
+  async tableOf(b64) {
+    return { ok: true, table: new HwpxDocument(fromB64(b64)).dbTable };
+  },
+
   /**
    * 화면을 처음 상태로 되돌린다. OCX 가 창을 닫을 때 부르고, 이 화면을 다음 창에서 다시 쓴다.
    * 이전 문서·권한·메뉴·키 설정을 모두 비우고 에디터를 새로 만든다 (이전 문서가 남지 않는다).
    */
   async reset() {
+    // Reset is a single lifecycle transition; do not allow overlapping teardown/recreation.
+    if (state.resetInProgress) throw new Error('에디터 초기화가 이미 진행 중입니다');
+    state.resetInProgress = true;
     try {
-      state.studio?.destroy();
-    } catch {
-      // 이미 정리된 에디터
+      try {
+        state.studio?.destroy();
+      } catch {
+        // The previous editor may already have been destroyed.
+      }
+      state.studio = null;
+      window.__hwpxReady = false;
+      window.hwpBridgeReady = false;
+      window.__hwpxErrs = [];
+      state.template = null;
+      state.fileName = 'document.hwpx';
+      state.mode = 'form';
+      state.allowEdit = false;
+      state.showMenu = false;
+      Object.assign(keys, DEFAULT_KEYS);
+      const root = document.querySelector('#editor');
+      if (!root) throw new Error('#editor 요소를 찾을 수 없습니다');
+      root.replaceChildren();
+      await startStudio();
+      if (!state.studio) throw new Error('에디터 생성 결과가 없습니다');
+      return { ok: true };
+    } catch (error) {
+      try {
+        state.studio?.destroy();
+      } catch {
+        // Best-effort cleanup after a failed recreation.
+      }
+      state.studio = null;
+      const root = document.querySelector('#editor');
+      root?.replaceChildren();
+      throw error;
+    } finally {
+      state.resetInProgress = false;
     }
-    state.studio = null;
-    state.template = null;
-    state.fileName = 'document.hwpx';
-    state.mode = 'form';
-    state.allowEdit = false;
-    state.showMenu = false;
-    Object.assign(keys, DEFAULT_KEYS);
-    await startStudio();
-    return { ok: true };
   },
 
   /** 개체 목록과 테이블명 */

@@ -47,6 +47,9 @@ interface IHwpxEditor : IDispatch
 	[id(32), propput] HRESULT ShowMenu([in] VARIANT_BOOL value);
 	[id(33)] HRESULT GetColumns([in] BSTR order, [out, retval] BSTR* result);
 	[id(34), propget] HRESULT StartupTimes([out, retval] BSTR* value);
+	[id(35)] HRESULT GetTableFromFile([in] BSTR path, [out, retval] BSTR* result);
+	[id(36)] HRESULT SetEditMode([in] VARIANT_BOOL edit, [out, retval] VARIANT_BOOL* result);
+	[id(37)] HRESULT GetMode([out, retval] BSTR* result);
 };
 
 [
