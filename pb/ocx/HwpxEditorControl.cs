@@ -54,6 +54,12 @@ namespace Hwpxpb
         [DispId(36)] bool SetEditMode(bool edit);
         // 지금 모드: form | edit | view
         [DispId(37)] string GetMode();
+        // 문서 닫기 (빈 화면). 다시 Open 하기 전까지 값 읽기·저장·인쇄는 실패
+        [DispId(38)] bool CloseDocument();
+        // Windows 프린터 선택 창. 고른 프린터 이름 (취소하면 "")
+        [DispId(39)] string SelectPrinter();
+        // 프린터 선택 창에서 프린터·매수를 고른 뒤 바로 인쇄. 취소하면 false
+        [DispId(40)] bool PrintDialog();
         // 출력 (빈 칸 안내문은 찍지 않는다)
         [DispId(24)] bool Print();
         [DispId(25)] bool PrintTo(string printerName, int copies);
@@ -276,6 +282,36 @@ namespace Hwpxpb
         }
 
         public bool SetEditMode(bool edit) => SetMode(edit ? "edit" : "form");
+
+        public bool CloseDocument() => Ok(Call("close"));
+
+        public string SelectPrinter()
+        {
+            return ChoosePrinter(out var name, out _) ? name : "";
+        }
+
+        public bool PrintDialog()
+        {
+            return ChoosePrinter(out var name, out var copies) && PrintTo(name, copies);
+        }
+
+        private bool ChoosePrinter(out string name, out int copies)
+        {
+            name = "";
+            copies = 1;
+            _lastError = "";
+            try
+            {
+                using (var dlg = new System.Windows.Forms.PrintDialog { AllowSomePages = false, AllowSelection = false, AllowPrintToFile = false, UseEXDialog = true })
+                {
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return false;
+                    name = dlg.PrinterSettings.PrinterName ?? "";
+                    copies = dlg.PrinterSettings.Copies < 1 ? 1 : dlg.PrinterSettings.Copies;
+                    return name.Length > 0;
+                }
+            }
+            catch (Exception ex) { Fail(ex.Message); return false; }
+        }
 
         public string GetMode()
         {
