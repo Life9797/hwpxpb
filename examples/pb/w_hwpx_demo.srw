@@ -25,6 +25,12 @@ type cb_print from commandbutton within w_hwpx_demo
 end type
 type st_status from statictext within w_hwpx_demo
 end type
+type cb_close from commandbutton within w_hwpx_demo
+end type
+type ddlb_printer from dropdownlistbox within w_hwpx_demo
+end type
+type cb_selprinter from commandbutton within w_hwpx_demo
+end type
 type dw_1 from datawindow within w_hwpx_demo
 end type
 end forward
@@ -53,6 +59,9 @@ cb_makedw cb_makedw
 cb_save cb_save
 cb_print cb_print
 st_status st_status
+cb_close cb_close
+ddlb_printer ddlb_printer
+cb_selprinter cb_selprinter
 dw_1 dw_1
 end type
 global w_hwpx_demo w_hwpx_demo
@@ -77,12 +86,14 @@ public function integer wf_dw_to_doc ()
 public function integer wf_doc_to_dw ()
 public function integer wf_make_dw ()
 public subroutine wf_layout ()
+public subroutine wf_load_printers ()
 end prototypes
 
 event ue_ready();// 에디터 준비 완료 (timer 에서 IsReady 를 보고 부른다)
 ib_ready = True
 iole.object.AllowEdit = cbx_edit.Checked
 st_status.Text = "에디터 준비됨"
+wf_load_printers()
 If is_file <> "" Then wf_open(is_file)
 end event
 
@@ -303,6 +314,27 @@ If IsValid(iole) Then
 End If
 end subroutine
 
+public subroutine wf_load_printers ();// 설치된 프린터를 목록에 넣고 기본 프린터를 고른다
+string ls_all, ls_def, ls_name
+long ll_pos
+
+ddlb_printer.Reset()
+ls_all = String(iole.object.GetPrinters())   // 줄바꿈으로 구분
+ls_def = String(iole.object.GetDefaultPrinter())
+Do While ls_all <> ""
+	ll_pos = Pos(ls_all, "~n")
+	If ll_pos = 0 Then
+		ls_name = ls_all
+		ls_all = ""
+	Else
+		ls_name = Left(ls_all, ll_pos - 1)
+		ls_all = Mid(ls_all, ll_pos + 1)
+	End If
+	If ls_name <> "" Then ddlb_printer.AddItem(ls_name)
+Loop
+If ls_def <> "" Then ddlb_printer.SelectItem(ls_def, 0)
+end subroutine
+
 on w_hwpx_demo.create
 this.sle_file=create sle_file
 this.cb_browse=create cb_browse
@@ -315,6 +347,9 @@ this.cb_makedw=create cb_makedw
 this.cb_save=create cb_save
 this.cb_print=create cb_print
 this.st_status=create st_status
+this.cb_close=create cb_close
+this.ddlb_printer=create ddlb_printer
+this.cb_selprinter=create cb_selprinter
 this.dw_1=create dw_1
 this.Control[]={this.sle_file,&
 this.cb_browse,&
@@ -327,6 +362,9 @@ this.cb_makedw,&
 this.cb_save,&
 this.cb_print,&
 this.st_status,&
+this.cb_close,&
+this.ddlb_printer,&
+this.cb_selprinter,&
 this.dw_1}
 end on
 
@@ -342,6 +380,9 @@ destroy(this.cb_makedw)
 destroy(this.cb_save)
 destroy(this.cb_print)
 destroy(this.st_status)
+destroy(this.cb_close)
+destroy(this.ddlb_printer)
+destroy(this.cb_selprinter)
 destroy(this.dw_1)
 end on
 
@@ -605,14 +646,26 @@ string facename = "맑은 고딕"
 string text = "인쇄"
 end type
 
-event clicked;If Not wf_check() Then Return
-If Not iole.object.Print() Then MessageBox("인쇄", String(iole.object.LastError))
+event clicked;// 고른 프린터로 바로 인쇄. 프린터를 고르지 않았으면 인쇄 대화상자(미리보기)
+string ls_printer
+
+If Not wf_check() Then Return
+ls_printer = Trim(ddlb_printer.Text)
+If ls_printer = "" Then
+	If Not iole.object.Print() Then MessageBox("인쇄", String(iole.object.LastError))
+	Return
+End If
+If iole.object.PrintTo(ls_printer, 1) Then
+	st_status.Text = "인쇄: " + ls_printer
+Else
+	MessageBox("인쇄", String(iole.object.LastError))
+End If
 end event
 
 type st_status from statictext within w_hwpx_demo
-integer x = 2300
-integer y = 168
-integer width = 2000
+integer x = 3220
+integer y = 44
+integer width = 1100
 integer height = 72
 integer textsize = -10
 integer weight = 400
@@ -624,6 +677,74 @@ long textcolor = 33554432
 long backcolor = 67108864
 boolean focusrectangle = false
 end type
+
+type cb_close from commandbutton within w_hwpx_demo
+integer x = 2930
+integer y = 28
+integer width = 260
+integer height = 100
+integer taborder = 45
+integer textsize = -10
+integer weight = 400
+fontcharset fontcharset = hangeul!
+fontpitch fontpitch = variable!
+fontfamily fontfamily = swiss!
+string facename = "맑은 고딕"
+string text = "닫기"
+end type
+
+event clicked;If Not wf_check() Then Return
+If iole.object.CloseDocument() Then
+	sle_file.Text = ""
+	st_status.Text = "문서를 닫았습니다"
+Else
+	MessageBox("닫기", String(iole.object.LastError))
+End If
+end event
+
+type ddlb_printer from dropdownlistbox within w_hwpx_demo
+integer x = 2288
+integer y = 156
+integer width = 1000
+integer height = 600
+integer taborder = 92
+integer textsize = -10
+integer weight = 400
+fontcharset fontcharset = hangeul!
+fontpitch fontpitch = variable!
+fontfamily fontfamily = swiss!
+string facename = "맑은 고딕"
+long textcolor = 33554432
+boolean sorted = false
+boolean vscrollbar = true
+borderstyle borderstyle = stylelowered!
+end type
+
+type cb_selprinter from commandbutton within w_hwpx_demo
+integer x = 3302
+integer y = 152
+integer width = 360
+integer height = 100
+integer taborder = 94
+integer textsize = -10
+integer weight = 400
+fontcharset fontcharset = hangeul!
+fontpitch fontpitch = variable!
+fontfamily fontfamily = swiss!
+string facename = "맑은 고딕"
+string text = "프린터 선택..."
+end type
+
+event clicked;// Windows 프린터 선택 창. 고른 프린터를 목록에서 선택해 둔다 (인쇄 버튼이 그 프린터로 찍음)
+string ls_name
+
+If Not wf_check() Then Return
+ls_name = String(iole.object.SelectPrinter())
+If ls_name = "" Then Return   // 취소
+If ddlb_printer.FindItem(ls_name, 0) <= 0 Then ddlb_printer.AddItem(ls_name)
+ddlb_printer.SelectItem(ls_name, 0)
+st_status.Text = "프린터: " + ls_name
+end event
 
 type dw_1 from datawindow within w_hwpx_demo
 integer x = 2900
