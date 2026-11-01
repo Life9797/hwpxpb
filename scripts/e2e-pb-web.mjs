@@ -58,6 +58,10 @@ out.getFields = await call('getFields', ':');
 const doc = await call('getDocument', ':');
 out.documentValues = doc.ok ? new HwpxDocument(Buffer.from(doc.hwpx, 'base64')).extract().values : doc;
 out.preparePrint = await call('preparePrint');
+out.beforeClose = (await call('getSchema')).schema.length;
+out.close = await call('close');
+out.afterClose = await call('getSchema');
+out.reopen = await call('open', b64, 'test.hwpx', 'form');
 out.events = events.map((e) => e.event);
 if (shot) {
   await page.waitForTimeout(1500);

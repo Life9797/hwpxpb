@@ -61,6 +61,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `ShowMenu` (속성) | 원래 에디터 메뉴·도구 모음 표시. 권한 없는 사용자에게는 항상 숨김. 권한자는 편집 모드에서 보이고, `true` 면 작성 모드에서도 보임. 기본 `false` |
 | `GetColumns(order)` | DB 컬럼 이름을 탭으로 이어서. `order` = `"document"`(문서에 나오는 순서) / `"created"`(한글에서 개체를 넣은 순서: 누름틀 다음 양식 개체) |
 | `StartupTimes` (속성, C++ 판) | 시작에 걸린 시간: 런타임(WebView2 시작) / 화면(페이지 열기) / 에디터(엔진 준비) / 합계. 준비되면 `Status` 에도 함께 나옴 |
+| `CloseDocument()` | 문서 닫기. 빈 화면이 되고, 다시 `Open` 하기 전까지 값 읽기·저장·인쇄는 false/`""` (`LastError` "열린 문서가 없습니다"). 편집 권한·모드·키 설정은 그대로 |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |
 | `GetFieldValue(column, comboSep)` | 값 하나 읽기 |
@@ -74,6 +75,8 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `SavePdf(path)` | PDF 로 저장 |
 | `Print()` | 인쇄 대화상자(미리보기)를 띄움. 프린터·매수·쪽 범위는 사용자가 고름 |
 | `PrintTo(printerName, copies)` | 대화상자 없이 바로 인쇄. `printerName` 이 `""` 이면 기본 프린터 |
+| `SelectPrinter()` | Windows 프린터 선택 창을 띄워 고른 프린터 이름을 돌려줌. 취소하면 `""`. 고른 이름을 `PrintTo` 에 넘김 |
+| `PrintDialog()` | 프린터 선택 창에서 프린터·매수를 고르게 한 뒤 바로 인쇄. 취소하면 false (`LastError` 는 빈 문자열) |
 | `GetPrinters()` | 설치된 프린터 이름 (줄마다 하나) |
 | `GetDefaultPrinter()` | 기본 프린터 이름 |
 | `SetKeys(nextObject, prevObject, nextField, prevField)` | 양식 입력에서 옮겨 다닐 키. `""` 는 그대로, `"none"` 은 끔 (아래 8절) |

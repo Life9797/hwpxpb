@@ -19,6 +19,7 @@
 #include <shlobj.h>
 #include <wincrypt.h>
 #include <winspool.h>
+#include <commdlg.h>
 #include <WebView2.h>
 #include <WebView2EnvironmentOptions.h>
 
@@ -725,6 +726,11 @@ public:
 		return Ret(result, Call(L"setMode", {Js(edit != VARIANT_FALSE ? L"edit" : L"form")}).ok);
 	}
 
+	/** 문서 닫기: 빈 화면으로 바꾼다. 권한·모드·키 설정은 그대로. 다시 Open 하기 전까지 값 읽기·저장·인쇄는 실패 */
+	STDMETHOD(CloseDocument)(VARIANT_BOOL* result) {
+		return Ret(result, Call(L"close", {}).ok);
+	}
+
 	/** 지금 모드: form | edit | view */
 	STDMETHOD(GetMode)(BSTR* result) {
 		Result r = Call(L"getPermission", {}, L"function(o){return o.mode||''}");
@@ -767,6 +773,23 @@ public:
 		if (SUCCEEDED(code) && status == COREWEBVIEW2_PRINT_STATUS_SUCCEEDED) return Ret(result, true);
 		if (status == COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE) return Ret(result, Fail(L"프린터를 쓸 수 없습니다: " + printer));
 		return Ret(result, Fail(L"인쇄 실패" + HrText(code)));
+	}
+
+	/** Windows 프린터 선택 창. 고른 프린터 이름을 돌려준다 (취소하면 "") */
+	STDMETHOD(SelectPrinter)(BSTR* result) {
+		std::wstring name;
+		long copies = 1;
+		ChoosePrinter(name, copies);
+		return Ret(result, name);
+	}
+
+	/** 프린터 선택 창에서 프린터·매수를 고르게 한 뒤 바로 인쇄. 취소하면 false (LastError 는 비움) */
+	STDMETHOD(PrintDialog)(VARIANT_BOOL* result) {
+		std::wstring name;
+		long copies = 1;
+		if (!ChoosePrinter(name, copies)) return Ret(result, false);
+		CComBSTR printer(name.c_str());
+		return PrintTo(printer, copies, result);
 	}
 
 	/** 설치된 프린터 이름 (줄바꿈으로 구분) */
@@ -823,6 +846,36 @@ public:
 	}
 
 private:
+	/** PrintDlg 로 프린터·매수를 고른다. 취소하면 false */
+	bool ChoosePrinter(std::wstring& name, long& copies) {
+		m_lastError.clear();
+		PRINTDLGW pd = {sizeof(pd)};
+		pd.hwndOwner = m_hWnd ? m_hWnd : ::GetActiveWindow();
+		pd.Flags = PD_NOPAGENUMS | PD_NOSELECTION | PD_HIDEPRINTTOFILE | PD_USEDEVMODECOPIESANDCOLLATE;
+		pd.nCopies = 1;
+		if (!::PrintDlgW(&pd)) {
+			DWORD e = ::CommDlgExtendedError();
+			if (e) Fail(L"프린터 선택 창을 열 수 없습니다 (" + std::to_wstring(e) + L")");
+			return false;
+		}
+		copies = 1;
+		if (pd.hDevNames) {
+			if (auto* dn = static_cast<DEVNAMES*>(::GlobalLock(pd.hDevNames))) {
+				name = reinterpret_cast<const wchar_t*>(dn) + dn->wDeviceOffset;
+				::GlobalUnlock(pd.hDevNames);
+			}
+			::GlobalFree(pd.hDevNames);
+		}
+		if (pd.hDevMode) {
+			if (auto* dm = static_cast<DEVMODEW*>(::GlobalLock(pd.hDevMode))) {
+				if (dm->dmFields & DM_COPIES) copies = dm->dmCopies;
+				::GlobalUnlock(pd.hDevMode);
+			}
+			::GlobalFree(pd.hDevMode);
+		}
+		return !name.empty();
+	}
+
 	struct Result {
 		bool ok = false;
 		std::wstring error;

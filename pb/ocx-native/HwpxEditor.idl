@@ -50,6 +50,9 @@ interface IHwpxEditor : IDispatch
 	[id(35)] HRESULT GetTableFromFile([in] BSTR path, [out, retval] BSTR* result);
 	[id(36)] HRESULT SetEditMode([in] VARIANT_BOOL edit, [out, retval] VARIANT_BOOL* result);
 	[id(37)] HRESULT GetMode([out, retval] BSTR* result);
+	[id(38)] HRESULT CloseDocument([out, retval] VARIANT_BOOL* result);
+	[id(39)] HRESULT SelectPrinter([out, retval] BSTR* result);
+	[id(40)] HRESULT PrintDialog([out, retval] VARIANT_BOOL* result);
 };
 
 [

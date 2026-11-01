@@ -22,6 +22,7 @@ const state = {
   allowEdit: false, // 문서 전체 편집 권한 (PB 는 OCX AllowEdit, 브라우저는 서버 /api/permission)
   showMenu: false, // 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지 (OCX ShowMenu)
   resetInProgress: false,
+  closed: false, // CloseDocument 로 닫은 뒤 다시 열기 전까지
 };
 
 /** 메뉴·도구 모음: 권한 없는 사용자는 항상 숨김. 권한자는 편집 모드에서, ShowMenu 면 작성 모드에서도 보인다 */
@@ -36,6 +37,9 @@ function checkMode(mode) {
   if (!MODES.includes(mode)) throw new Error(`모드는 ${MODES.join(', ')} 중 하나입니다: ${mode}`);
   if (mode === 'edit' && !state.allowEdit) throw new Error('편집 권한이 없습니다 (작성만 할 수 있습니다)');
   return mode;
+}
+function requireDocument() {
+  if (state.closed) throw new Error('열린 문서가 없습니다 (닫은 뒤 다시 열지 않음)');
 }
 /** 원본 양식에 값만 다시 넣어 결과를 만드는지 (자유 편집 결과를 쓰지 않음) */
 const rebuildFromTemplate = () => Boolean(state.template) && (state.mode === 'form' || !state.allowEdit);
@@ -191,6 +195,7 @@ const api = {
     checkMode(mode);
     state.template = fromB64(b64);
     state.fileName = fileName;
+    state.closed = false;
     state.mode = mode;
     new HwpxDocument(state.template); // HWPX 인지 먼저 확인
     await load(state.template);
@@ -227,6 +232,18 @@ const api = {
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
+  /** 문서 닫기: 빈 문서로 바꾸고 열었던 양식을 잊는다. 권한·모드·키 설정은 그대로 */
+  async close() {
+    await state.studio.commands.execute('file:new-doc');
+    state.template = null;
+    state.fileName = 'document.hwpx';
+    state.closed = true;
+    await setFormMode(state.mode === 'form');
+    await applyChrome();
+    emit('closed');
+    return { ok: true };
+  },
+
   /** 에디터에 열지 않고 파일(base64)의 테이블명만 읽는다 */
   async tableOf(b64) {
     return { ok: true, table: new HwpxDocument(fromB64(b64)).dbTable };
@@ -252,6 +269,7 @@ const api = {
       window.__hwpxErrs = [];
       state.template = null;
       state.fileName = 'document.hwpx';
+      state.closed = false;
       state.mode = 'form';
       state.allowEdit = false;
       state.showMenu = false;
@@ -279,18 +297,21 @@ const api = {
 
   /** 개체 목록과 테이블명 */
   async getSchema() {
+    requireDocument();
     const doc = new HwpxDocument(state.template ?? (await currentBytes()));
     return { ok: true, table: doc.dbTable, schema: doc.schema() };
   },
 
   /** DB 컬럼 이름 목록. order = 'document'(문서 순서, 기본) | 'created'(개체를 넣은 순서) */
   async getColumns(order = 'document') {
+    requireDocument();
     const doc = new HwpxDocument(state.template ?? (await currentBytes()));
     return { ok: true, table: doc.dbTable, columns: doc.columns(order) };
   },
 
   /** 값 대입. values = {컬럼: 값}. 결과 {applied, unknown, rejected} */
   async setFields(values, comboSep = ':') {
+    requireDocument();
     if (typeof values === 'string') values = JSON.parse(values || '{}');
     const base = rebuildFromTemplate() ? state.template : await currentBytes();
     const doc = new HwpxDocument(base);
@@ -306,11 +327,13 @@ const api = {
 
   /** 값 추출. {table, values:{컬럼: 값}} */
   async getFields(comboSep = ':') {
+    requireDocument();
     return { ok: true, ...(await readValues(comboSep)) };
   },
 
   /** 결과 문서(HWPX)를 base64 로 */
   async getDocument(comboSep = ':') {
+    requireDocument();
     return { ok: true, hwpx: toB64(await buildDocument(comboSep)) };
   },
 
@@ -319,6 +342,7 @@ const api = {
    * 이후 OCX 는 WebView2 인쇄/PrintToPdf 를, 브라우저는 window.print() 를 부른다.
    */
   async preparePrint(comboSep = ':') {
+    requireDocument();
     const pages = await renderPrintPages(comboSep);
     const area = document.getElementById('print-area');
     area.replaceChildren(

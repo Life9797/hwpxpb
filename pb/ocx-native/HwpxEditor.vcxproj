@@ -59,7 +59,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <ModuleDefinitionFile>HwpxEditor.def</ModuleDefinitionFile>
-      <AdditionalDependencies>$(WebView2Dir)x86\WebView2LoaderStatic.lib;version.lib;crypt32.lib;winspool.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(WebView2Dir)x86\WebView2LoaderStatic.lib;version.lib;crypt32.lib;winspool.lib;shlwapi.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <RegisterOutput>false</RegisterOutput>
     </Link>
   </ItemDefinitionGroup>
