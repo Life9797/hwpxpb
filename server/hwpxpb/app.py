@@ -6,7 +6,7 @@
   GET  /api/templates/:id                 템플릿 파일 내려받기
   GET  /api/templates/:id/schema          개체 목록 + 테이블명
   POST /api/fill                          값 대입 → HWPX 또는 PDF
-  POST /api/extract?comboSep=:            본문 HWPX 에서 값 추출
+  POST /api/extract?comboSep=:&groupSep=|  본문 HWPX 에서 값 추출 (groupSep: 누름틀 묶음 구분자, 기본 |)
   POST /api/schema                        본문 HWPX 의 개체 목록
   POST /api/pdf                           본문 HWPX → PDF
   GET  /api/permission                    이 사용자가 문서 전체를 편집할 수 있는지 {canEdit}
@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
-from .engine import HwpxDocument
+from .engine import GROUP_SEP, HwpxDocument
 from .pdf import hwpx_to_pdf, printable
 
 ID_RE = re.compile(r"^[A-Za-z0-9가-힣_.-]{1,100}$")
@@ -123,6 +123,7 @@ class App:
         path = url.path
         query = parse_qs(url.query)
         combo_sep = query.get("comboSep", [":"])[0]
+        group_sep = query.get("groupSep", [""])[0] or GROUP_SEP
         method = req.command
 
         if path == "/health":
@@ -174,7 +175,7 @@ class App:
             else:
                 raise HttpError(400, "templateId 또는 template(base64) 가 필요합니다")
             doc = self.open_doc(src)
-            result = doc.fill(body.get("values") or {}, body.get("comboSep") or ":")
+            result = doc.fill(body.get("values") or {}, body.get("comboSep") or ":", body.get("groupSep") or GROUP_SEP)
             if body.get("strict") and (result["unknown"] or result["rejected"]):
                 return req.send_json(422, {"error": "대입하지 못한 값이 있습니다", **result})
             hwpx = doc.to_bytes()
@@ -194,7 +195,7 @@ class App:
             )
 
         if method == "POST" and path == "/api/extract":
-            return req.send_json(200, self.open_doc(req.read_body(self.max_body_bytes)).extract(combo_sep))
+            return req.send_json(200, self.open_doc(req.read_body(self.max_body_bytes)).extract(combo_sep, group_sep))
         if method == "POST" and path == "/api/schema":
             doc = self.open_doc(req.read_body(self.max_body_bytes))
             return req.send_json(200, {"table": doc.db_table, "schema": doc.schema()})

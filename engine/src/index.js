@@ -7,11 +7,14 @@
 //   테이블명  문서 정보(키워드/설명)에 "dbtable=테이블명"
 //   누름틀·드롭다운·단독 체크박스  개체 이름 = 컬럼명 (단독 체크박스 값은 Y/N)
 //   다중 체크박스  이름 "컬럼__코드" → 체크된 코드를 "01,02" 로
+//   누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "|" 로 이어서 (구분자는 groupSep 로 바꿀 수 있음)
 //   라디오  그룹 이름 = 컬럼, 선택된 버튼의 이름 = 값 ("컬럼__값" 도 허용)
 //   드롭다운  항목 "코드<구분자>표시" (구분자 기본 ":"), 값은 코드. 코드만 줘도 항목 선택
 import { unzipSync, zipSync } from 'fflate';
 
 export const SEP = '__';
+/** 누름틀 묶음 값의 기본 구분자 */
+export const GROUP_SEP = '|';
 const SECTION_RE = /^Contents\/section\d+\.xml$/;
 const FIELD_BEGIN_RE = /<hp:fieldBegin\b[^>]*\btype="CLICK_HERE"[^>]*>/g;
 const FORM_RE = /<hp:(checkBtn|radioBtn|comboBox)\b[^>]*>/g;
@@ -297,7 +300,7 @@ export class HwpxDocument {
     const out = [];
     for (const it of items) {
       let col = it.name;
-      if (it.type === 'checkbox' && col.includes(SEP)) col = col.slice(0, col.indexOf(SEP));
+      if ((it.type === 'checkbox' || it.type === 'clickhere') && col.includes(SEP)) col = col.slice(0, col.indexOf(SEP));
       else if (it.type === 'radio') col = it.group || it.name;
       if (!out.includes(col)) out.push(col);
     }
@@ -305,35 +308,64 @@ export class HwpxDocument {
   }
 
   /** DB 컬럼 기준 추출: {table, values:{컬럼: 값}} */
-  extract({ comboSep = ':' } = {}) {
+  extract({ comboSep = ':', groupSep = GROUP_SEP } = {}) {
     const raw = this.extractRaw();
     const kinds = new Map(this.schema().map((x) => [x.name, x]));
     const out = {};
+    const joinWith = {};
     for (const [name, val] of Object.entries(raw)) {
       const type = kinds.get(name)?.type ?? 'radio'; // 라디오는 그룹 이름으로 들어온다
-      if (type === 'checkbox' && name.includes(SEP)) {
+      if ((type === 'checkbox' || type === 'clickhere') && name.includes(SEP)) {
         const [col, code] = [name.slice(0, name.indexOf(SEP)), name.slice(name.indexOf(SEP) + SEP.length)];
-        out[col] ??= [];
-        if (val) out[col].push(code);
+        if (!Array.isArray(out[col])) out[col] = [];
+        if (type === 'checkbox') {
+          joinWith[col] = ',';
+          if (val) out[col].push(code);
+        } else {
+          joinWith[col] = groupSep;
+          out[col].push(val);
+        }
       } else if (type === 'checkbox') out[name] = val ? 'Y' : 'N';
       else if (type === 'radio') out[name] = String(val).includes(SEP) ? String(val).split(SEP).slice(1).join(SEP) : val;
       else if (type === 'combobox') out[name] = codeOf(val, comboSep);
       else out[name] = val;
     }
-    for (const k of Object.keys(out)) if (Array.isArray(out[k])) out[k] = out[k].join(',');
+    for (const k of Object.keys(out)) {
+      if (!Array.isArray(out[k])) continue;
+      // 누름틀 묶음이 모두 비었으면 "" (구분자만 남기지 않는다)
+      out[k] = out[k].every((v) => v === '') ? '' : out[k].join(joinWith[k]);
+    }
     return { table: this.dbTable, values: out };
   }
 
   /** DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 배열) */
-  fill(values, { comboSep = ':' } = {}) {
+  fill(values, { comboSep = ':', groupSep = GROUP_SEP } = {}) {
     const items = this.schema();
     const raw = {};
     const known = new Set();
+    const colOf = new Map(); // 개체(라디오는 그룹) 이름 → 컬럼
+    // 누름틀 묶음: 컬럼 → 문서 순서의 개체 이름 목록 (같은 이름은 한 번)
+    const groups = new Map();
+    for (const it of items) {
+      if (it.type !== 'clickhere' || !it.name.includes(SEP)) continue;
+      const col = it.name.slice(0, it.name.indexOf(SEP));
+      if (!groups.has(col)) groups.set(col, []);
+      if (!groups.get(col).includes(it.name)) groups.get(col).push(it.name);
+    }
+    for (const [col, names] of groups) {
+      known.add(col);
+      for (const n of names) colOf.set(n, col);
+      if (!(col in values)) continue;
+      const parts = splitParts(values[col], groupSep, names.length);
+      names.forEach((n, i) => (raw[n] = parts[i] ?? ''));
+    }
     for (const it of items) {
       const { name, type } = it;
+      if (type === 'clickhere' && name.includes(SEP)) continue;
       if (type === 'checkbox' && name.includes(SEP)) {
         const col = name.slice(0, name.indexOf(SEP));
         known.add(col);
+        colOf.set(name, col);
         if (col in values) {
           const codes = String(values[col] ?? '')
             .split(',')
@@ -342,17 +374,20 @@ export class HwpxDocument {
         }
       } else if (type === 'checkbox') {
         known.add(name);
+        colOf.set(name, name);
         if (name in values) raw[name] = ['Y', '1', 'TRUE'].includes(String(values[name]).toUpperCase());
       } else if (type === 'radio') {
         known.add(it.group);
+        colOf.set(it.group, it.group);
         if (it.group in values) raw[it.group] = values[it.group];
       } else {
         known.add(name);
+        colOf.set(name, name);
         if (name in values) raw[name] = values[name];
       }
     }
-    const { applied, rejected } = this.fillRaw(raw, { comboSep });
-    const appliedCols = new Set([...applied].map((n) => (n.includes(SEP) ? n.slice(0, n.indexOf(SEP)) : n)));
+    const { applied } = this.fillRaw(raw, { comboSep });
+    const appliedCols = new Set([...applied].map((n) => colOf.get(n) ?? n));
     const keys = Object.keys(values);
     return {
       applied: keys.filter((k) => appliedCols.has(k)).sort(),
@@ -360,4 +395,13 @@ export class HwpxDocument {
       rejected: keys.filter((k) => known.has(k) && !appliedCols.has(k)).sort(),
     };
   }
+}
+
+/** 값을 구분자로 n 조각까지 나눈다. 조각이 남으면 마지막 칸에 나머지를 그대로 붙인다 */
+function splitParts(value, sep, n) {
+  const text = value == null ? '' : String(value);
+  if (text === '') return [];
+  const parts = sep ? text.split(sep) : [text];
+  if (parts.length <= n) return parts;
+  return [...parts.slice(0, n - 1), parts.slice(n - 1).join(sep)];
 }

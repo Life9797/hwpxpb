@@ -28,7 +28,12 @@ const para = (body) =>
   `<hp:p id="0" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${body}` +
   `<hp:linesegarray><hp:lineseg textpos="0" vertpos="0" vertsize="1000" textheight="1000" baseline="850" spacing="600" horzpos="0" horzsize="7280" flags="393216"/></hp:linesegarray></hp:p>`;
 
-export function makeHwpx({ keyword = 'dbtable=TB_TEST' } = {}) {
+export function makeHwpx({ keyword = 'dbtable=TB_TEST', group = false } = {}) {
+  // group: 누름틀 묶음 ADDR__1~3 (둘째 칸은 입력됨)
+  const extra = group
+    ? para(clickHere(201, 'ADDR__1', '시도', '시도') + clickHere(202, 'ADDR__2', '구군', '강남구', { dirty: 1 })) +
+      para(clickHere(203, 'ADDR__3', '상세', '상세'))
+    : '';
   const section =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>' +
     '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">' +
@@ -48,6 +53,7 @@ export function makeHwpx({ keyword = 'dbtable=TB_TEST' } = {}) {
         '<hp:listItem displayText="" value="01:서울"/><hp:listItem displayText="" value="02:부산"/><hp:listItem displayText="" value="03|대구"/>',
       ),
     ) +
+    extra +
     '</hs:sec>';
   const hpf =
     '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?><opf:package xmlns:opf="http://www.idpf.org/2007/opf/"><opf:metadata>' +

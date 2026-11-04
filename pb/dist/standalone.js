@@ -14,6 +14,7 @@
 // 편집 권한은 서버의 /api/permission 이 정한다 (EDIT_KEYS, EDIT_USERS). 권한이 없거나 서버 없이
 // 열었으면 작성만 할 수 있고, 저장하는 파일도 "원본 양식 + 입력값" 이다.
 //   &comboSep=|                         드롭다운 코드 구분자 (기본 ":")
+//   &groupSep=,                         누름틀 묶음(컬럼__x) 값 구분자 (기본 "|")
 import { DEFAULT_KEYS, eventKey } from './bridge.js';
 
 if (!window.chrome?.webview) {
@@ -163,6 +164,7 @@ if (!window.chrome?.webview) {
   async function ready() {
     while (!window.hwpBridgeReady) await new Promise((r) => setTimeout(r, 50));
     await loadPermission();
+    if (params.get('groupSep')) await call('setGroupSep', params.get('groupSep'));
     try {
       await call('setKeys', JSON.stringify(loadKeys()));
     } catch {

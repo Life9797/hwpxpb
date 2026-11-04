@@ -26,6 +26,9 @@ CASES = [
     ({"PT_NM": '홍<길>동 & "1"', "MEMO": "첫줄\n둘째줄", "AGREE_YN": "Y", "ITEM_CD": "01,02", "SEX_CD": "F", "REGION_CD": "02", "NOPE": 1}, ":"),
     ({"REGION_CD": "03", "SEX_CD": "남", "RESULT": "", "PT_NM": 175.5}, "|"),
     ({"REGION_CD": "99", "SEX_CD": "X", "AGREE_YN": "N", "ITEM_CD": ""}, ":"),
+    ({"ADDR": "서울시|서초구|반포대로 1, 101호|별관"}, ":"),
+    ({"ADDR": "부산시", "ITEM_CD__01": "Y"}, ":"),
+    ({"ADDR": ""}, ":"),
 ]
 
 
@@ -51,7 +54,10 @@ class ParityTest(unittest.TestCase):
         # 문서의 실제 개체로 값을 채운 경우도 비교
         own = {}
         for it in HwpxDocument(data).schema():
-            if it["type"] == "clickhere":
+            if it["type"] == "clickhere" and "__" in it["name"]:
+                col = it["name"].split("__")[0]
+                own[col] = (own[col] + "|" if col in own else "") + f"값 {it['name']}"
+            elif it["type"] == "clickhere":
                 own[it["name"]] = f"값 {it['name']}\n<&>"
             elif it["type"] == "checkbox":
                 own[it["name"].split("__")[0]] = "Y" if "__" not in it["name"] else it["name"].split("__", 1)[1]
@@ -74,6 +80,9 @@ class ParityTest(unittest.TestCase):
 
     def test_fixture(self):
         self.compare(make_hwpx(), "fixture")
+
+    def test_fixture_group(self):
+        self.compare(make_hwpx(group=True), "fixture-group")
 
     def test_real_forms(self):
         for p in filter(None, os.environ.get("HWPXPB_PARITY_FILES", "").split(":")):

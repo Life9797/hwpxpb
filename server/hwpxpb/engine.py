@@ -7,6 +7,7 @@ DB 매핑 규칙
   테이블명  문서 정보(키워드/설명)에 "dbtable=테이블명"
   누름틀·드롭다운·단독 체크박스  개체 이름 = 컬럼명 (단독 체크박스 값은 Y/N)
   다중 체크박스  이름 "컬럼__코드" → 체크된 코드를 "01,02" 로
+  누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "|" 로 이어서 (구분자는 group_sep 로 바꿀 수 있음)
   라디오  그룹 이름 = 컬럼, 선택된 버튼의 이름 = 값 ("컬럼__값" 도 허용)
   드롭다운  항목 "코드<구분자>표시" (구분자 기본 ":"), 값은 코드. 코드만 줘도 항목 선택
 """
@@ -18,6 +19,7 @@ import zipfile
 from typing import Any, Iterator
 
 SEP = "__"
+GROUP_SEP = "|"  # 누름틀 묶음 값의 기본 구분자
 SECTION_RE = re.compile(r"^Contents/section\d+\.xml$")
 FIELD_BEGIN_RE = re.compile(r'<hp:fieldBegin\b[^>]*\btype="CLICK_HERE"[^>]*>')
 FORM_RE = re.compile(r"<hp:(checkBtn|radioBtn|comboBox)\b[^>]*>")
@@ -117,6 +119,17 @@ def pick_combo_item(items: list[str], wanted: Any, combo_sep: str) -> str | None
     return next((it for it in items if it == w or code_of(it, combo_sep) == w), None)
 
 
+def split_parts(value: Any, sep: str, n: int) -> list[str]:
+    """값을 구분자로 n 조각까지 나눈다. 조각이 남으면 마지막 칸에 나머지를 그대로 붙인다"""
+    text = to_text(value)
+    if text == "":
+        return []
+    parts = text.split(sep) if sep else [text]
+    if len(parts) <= n:
+        return parts
+    return parts[: n - 1] + [sep.join(parts[n - 1:])]
+
+
 def radio_matches(tag: str, wanted: Any) -> bool:
     want = to_text(wanted)
     name = attr(tag, "name") or ""
@@ -200,7 +213,7 @@ class HwpxDocument:
         out: list[str] = []
         for _, it in items:
             col = it["name"]
-            if it["type"] == "checkbox" and SEP in col:
+            if it["type"] in ("checkbox", "clickhere") and SEP in col:
                 col = col[: col.index(SEP)]
             elif it["type"] == "radio":
                 col = it.get("group") or it["name"]
@@ -320,18 +333,25 @@ class HwpxDocument:
             self._set_xml(s, _apply_edits(xml, edits))
         return self
 
-    def extract(self, combo_sep: str = ":") -> dict:
+    def extract(self, combo_sep: str = ":", group_sep: str = GROUP_SEP) -> dict:
         """DB 컬럼 기준 추출: {table, values:{컬럼: 값}}"""
         raw = self.extract_raw()
         kinds = {x["name"]: x for x in self.schema()}
         out: dict[str, Any] = {}
+        join_with: dict[str, str] = {}
         for name, val in raw.items():
             kind = kinds.get(name, {}).get("type", "radio")  # 라디오는 그룹 이름으로 들어온다
-            if kind == "checkbox" and SEP in name:
+            if kind in ("checkbox", "clickhere") and SEP in name:
                 col, code = name[: name.index(SEP)], name[name.index(SEP) + len(SEP):]
-                out.setdefault(col, [])
-                if val:
-                    out[col].append(code)
+                if not isinstance(out.get(col), list):
+                    out[col] = []
+                if kind == "checkbox":
+                    join_with[col] = ","
+                    if val:
+                        out[col].append(code)
+                else:
+                    join_with[col] = group_sep
+                    out[col].append(val)
             elif kind == "checkbox":
                 out[name] = "Y" if val else "N"
             elif kind == "radio":
@@ -343,35 +363,59 @@ class HwpxDocument:
                 out[name] = val
         for k, v in out.items():
             if isinstance(v, list):
-                out[k] = ",".join(v)
+                # 누름틀 묶음이 모두 비었으면 "" (구분자만 남기지 않는다)
+                out[k] = "" if all(x == "" for x in v) else join_with[k].join(v)
         return {"table": self.db_table, "values": out}
 
-    def fill(self, values: dict[str, Any], combo_sep: str = ":") -> dict:
+    def fill(self, values: dict[str, Any], combo_sep: str = ":", group_sep: str = GROUP_SEP) -> dict:
         """DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 목록)"""
+        items = self.schema()
         raw: dict[str, Any] = {}
         known: set[str] = set()
-        for it in self.schema():
+        col_of: dict[str, str] = {}  # 개체(라디오는 그룹) 이름 → 컬럼
+        # 누름틀 묶음: 컬럼 → 문서 순서의 개체 이름 목록 (같은 이름은 한 번)
+        groups: dict[str, list[str]] = {}
+        for it in items:
+            if it["type"] == "clickhere" and SEP in it["name"]:
+                names = groups.setdefault(it["name"][: it["name"].index(SEP)], [])
+                if it["name"] not in names:
+                    names.append(it["name"])
+        for col, names in groups.items():
+            known.add(col)
+            for n in names:
+                col_of[n] = col
+            if col in values:
+                parts = split_parts(values[col], group_sep, len(names))
+                for i, n in enumerate(names):
+                    raw[n] = parts[i] if i < len(parts) else ""
+        for it in items:
             name, kind = it["name"], it["type"]
+            if kind == "clickhere" and SEP in name:
+                continue
             if kind == "checkbox" and SEP in name:
                 col = name[: name.index(SEP)]
                 known.add(col)
+                col_of[name] = col
                 if col in values:
                     codes = [c.strip() for c in to_text(values[col]).split(",")]
                     raw[name] = name[name.index(SEP) + len(SEP):] in codes
             elif kind == "checkbox":
                 known.add(name)
+                col_of[name] = name
                 if name in values:
                     raw[name] = to_text(values[name]).upper() in ("Y", "1", "TRUE")
             elif kind == "radio":
                 known.add(it["group"])
+                col_of[it["group"]] = it["group"]
                 if it["group"] in values:
                     raw[it["group"]] = values[it["group"]]
             else:
                 known.add(name)
+                col_of[name] = name
                 if name in values:
                     raw[name] = values[name]
         applied, _ = self.fill_raw(raw, combo_sep)
-        applied_cols = {n[: n.index(SEP)] if SEP in n else n for n in applied}
+        applied_cols = {col_of.get(n, n) for n in applied}
         keys = list(values.keys())
         return {
             "applied": sorted(k for k in keys if k in applied_cols),
