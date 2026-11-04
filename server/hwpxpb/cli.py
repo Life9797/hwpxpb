@@ -1,8 +1,8 @@
 """Unix 배치·쉘에서 서버 없이 바로 쓰는 명령행 도구, 그리고 서버 실행.
 
   hwpxpb schema  <양식.hwpx>
-  hwpxpb extract <문서.hwpx> [--combo-sep :]
-  hwpxpb fill    <양식.hwpx> <값.json|-> -o <출력.hwpx> [--pdf <출력.pdf>] [--combo-sep :] [--strict]
+  hwpxpb extract <문서.hwpx> [--combo-sep :] [--group-sep '|']
+  hwpxpb fill    <양식.hwpx> <값.json|-> -o <출력.hwpx> [--pdf <출력.pdf>] [--combo-sep :] [--group-sep '|'] [--strict]
   hwpxpb pdf     <문서.hwpx> -o <출력.pdf>
   hwpxpb serve   [--port 8080] [--host 0.0.0.0]
 """
@@ -13,13 +13,13 @@ import os
 import sys
 from pathlib import Path
 
-from .engine import HwpxDocument
+from .engine import GROUP_SEP, HwpxDocument
 from .pdf import hwpx_to_pdf, printable
 
 USAGE = """사용법:
   hwpxpb schema  <양식.hwpx>
-  hwpxpb extract <문서.hwpx> [--combo-sep :]
-  hwpxpb fill    <양식.hwpx> <값.json|-> -o <출력.hwpx> [--pdf <출력.pdf>] [--combo-sep :] [--strict]
+  hwpxpb extract <문서.hwpx> [--combo-sep :] [--group-sep '|']
+  hwpxpb fill    <양식.hwpx> <값.json|-> -o <출력.hwpx> [--pdf <출력.pdf>] [--combo-sep :] [--group-sep '|'] [--strict]
   hwpxpb pdf     <문서.hwpx> -o <출력.pdf>
   hwpxpb serve   [--port 8080] [--host 0.0.0.0]"""
 
@@ -40,6 +40,8 @@ def parse(argv: list[str]) -> tuple[list[str], dict]:
             opt["output"] = next(it, None)
         elif a == "--pdf":
             opt["pdf"] = next(it, None)
+        elif a == "--group-sep":
+            opt["group_sep"] = next(it, None)
         elif a == "--combo-sep":
             opt["combo_sep"] = next(it, None)
         elif a == "--port":
@@ -90,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     cmd, rest = (argv[0], argv[1:]) if argv else ("", [])
     pos, opt = parse(rest)
     combo_sep = opt.get("combo_sep") or ":"
+    group_sep = opt.get("group_sep") or GROUP_SEP
     try:
         if cmd == "serve":
             return serve(opt)
@@ -97,11 +100,11 @@ def main(argv: list[str] | None = None) -> int:
             doc = HwpxDocument(Path(pos[0]).read_bytes())
             return out({"table": doc.db_table, "schema": doc.schema()})
         if cmd == "extract" and pos:
-            return out(HwpxDocument(Path(pos[0]).read_bytes()).extract(combo_sep))
+            return out(HwpxDocument(Path(pos[0]).read_bytes()).extract(combo_sep, group_sep))
         if cmd == "fill" and len(pos) >= 2 and opt.get("output"):
             text = sys.stdin.read() if pos[1] == "-" else Path(pos[1]).read_text(encoding="utf-8")
             doc = HwpxDocument(Path(pos[0]).read_bytes())
-            result = doc.fill(json.loads(text), combo_sep)
+            result = doc.fill(json.loads(text), combo_sep, group_sep)
             out(result)
             if opt.get("strict") and (result["unknown"] or result["rejected"]):
                 return 2

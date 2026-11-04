@@ -131,24 +131,25 @@ test('columns: 문서 순서와 넣은 순서(누름틀 id 순 → 양식 개체
   assert.ok(created.slice(firstForm).every((c) => kinds.get(c) !== 'clickhere'));
 });
 
-test('누름틀 묶음: 컬럼__x 누름틀은 컬럼 하나로 묶어 "," 로 잇고, 대입할 때 나눠 넣는다', () => {
+test('누름틀 묶음: 컬럼__x 누름틀은 컬럼 하나로 묶어 "|" 로 잇고, 대입할 때 나눠 넣는다', () => {
   const doc = new HwpxDocument(makeHwpx({ group: true }));
-  assert.equal(doc.extract().values.ADDR, ',강남구,');
+  assert.equal(doc.extract().values.ADDR, '|강남구|');
   assert.deepEqual(doc.columns('created').slice(0, 4), ['PT_NM', 'RESULT', 'MEMO', 'ADDR']);
-  // 조각이 칸보다 많으면 마지막 칸에 나머지를 그대로 넣는다
-  const res = doc.fill({ ADDR: '서울시,서초구,반포대로 1, 101호' });
+  // 조각이 칸보다 많으면 마지막 칸에 나머지를 그대로 넣는다. 쉼표는 값의 일부
+  const res = doc.fill({ ADDR: '서울시|서초구|반포대로 1, 101호|별관' });
   assert.deepEqual(res, { applied: ['ADDR'], unknown: [], rejected: [] });
   const raw = new HwpxDocument(doc.toBytes()).extractRaw();
   assert.equal(raw.ADDR__1, '서울시');
   assert.equal(raw.ADDR__2, '서초구');
-  assert.equal(raw.ADDR__3, '반포대로 1, 101호');
+  assert.equal(raw.ADDR__3, '반포대로 1, 101호|별관');
   // 조각이 모자라면 남은 칸은 비운다, 개체 이름(ADDR__1)은 컬럼이 아니다
   const r2 = doc.fill({ ADDR: '부산시', ADDR__1: 'x' });
   assert.deepEqual(r2, { applied: ['ADDR'], unknown: ['ADDR__1'], rejected: [] });
-  assert.equal(new HwpxDocument(doc.toBytes()).extract().values.ADDR, '부산시,,');
+  assert.equal(new HwpxDocument(doc.toBytes()).extract().values.ADDR, '부산시||');
   doc.fill({ ADDR: '' });
   assert.equal(new HwpxDocument(doc.toBytes()).extract().values.ADDR, '');
   // 구분자 지정
-  doc.fill({ ADDR: '대구|중구|동성로' }, { groupSep: '|' });
-  assert.equal(new HwpxDocument(doc.toBytes()).extract({ groupSep: '|' }).values.ADDR, '대구|중구|동성로');
+  doc.fill({ ADDR: '대구,중구,동성로' }, { groupSep: ',' });
+  assert.equal(new HwpxDocument(doc.toBytes()).extract().values.ADDR, '대구|중구|동성로');
+  assert.equal(new HwpxDocument(doc.toBytes()).extract({ groupSep: ',' }).values.ADDR, '대구,중구,동성로');
 });

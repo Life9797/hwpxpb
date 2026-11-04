@@ -54,7 +54,7 @@ Chrome·Edge 에서는 Ctrl+Tab 이 탭 전환에 먼저 쓰여 화면까지 오
 
 - 연 파일에 바로 저장하는 기능은 Chrome·Edge 에서, **https 주소나 localhost** 로 접속했을 때만 됩니다.
   `http://서버주소` 로 접속하면 저장 버튼이 파일 내려받기로 바뀝니다. 사내에서는 앞단 웹서버(nginx 등)에 https 를 붙여 쓰기를 권합니다.
-- 등록한 양식을 바로 열기: `http://서버:8080/?template=rx01` (`&mode=edit` 자유 편집, `&comboSep=|` 드롭다운 구분자)
+- 등록한 양식을 바로 열기: `http://서버:8080/?template=rx01` (`&mode=edit` 자유 편집, `&comboSep=|` 드롭다운 구분자, `&groupSep=,` 누름틀 묶음 구분자)
 - `API_KEY` 를 설정한 서버에서는 에디터 화면 파일은 키 없이 열리고, 양식을 불러올 때만 키가 필요합니다: `?template=rx01&key=비밀값`
 - 파일은 브라우저 안에서만 처리되고 서버로 올라가지 않습니다.
 
@@ -99,7 +99,7 @@ curl -H "$H" --data-binary @작성본.hwpx 'http://srv:8080/api/extract?comboSep
 | GET | `/api/templates/{id}` | 양식 파일 |
 | GET | `/api/templates/{id}/schema` | `{table, schema:[{name,type,guide,group,items}]}` |
 | POST | `/api/fill` | 값 대입. 아래 본문 참고 |
-| POST | `/api/extract?comboSep=:` | 본문 HWPX → `{table, values}` |
+| POST | `/api/extract?comboSep=:&groupSep=\|` | 본문 HWPX → `{table, values}`. `groupSep` 은 누름틀 묶음(`컬럼__x`) 구분자 (기본 `\|`) |
 | POST | `/api/schema` | 본문 HWPX → `{table, schema}` |
 | POST | `/api/pdf` | 본문 HWPX → PDF |
 
@@ -109,6 +109,7 @@ curl -H "$H" --data-binary @작성본.hwpx 'http://srv:8080/api/extract?comboSep
   "templateId": "rx01",          // 또는 "template": "<HWPX base64>"
   "values": { "PT_NM": "홍길동", "ITEM_CD": "01,02" },
   "comboSep": ":",               // 드롭다운 코드 구분자 (기본 ":")
+  "groupSep": "|",               // 누름틀 묶음(컬럼__x) 값 구분자 (기본 "|")
   "format": "hwpx",              // hwpx | pdf | both (both 는 JSON 에 base64 둘 다)
   "strict": false                // true 면 대입 못 한 값이 있을 때 422
 }
@@ -121,8 +122,8 @@ PDF 에는 값이 비어 있는 누름틀의 안내문이 찍히지 않습니다
 
 ```bash
 hwpxpb schema  양식.hwpx
-hwpxpb extract 작성본.hwpx [--combo-sep :]
-hwpxpb fill    양식.hwpx 값.json -o 결과.hwpx [--pdf 결과.pdf] [--combo-sep :] [--strict]
+hwpxpb extract 작성본.hwpx [--combo-sep :] [--group-sep '|']
+hwpxpb fill    양식.hwpx 값.json -o 결과.hwpx [--pdf 결과.pdf] [--combo-sep :] [--group-sep '|'] [--strict]
 echo '{"PT_NM":"홍길동"}' | hwpxpb fill 양식.hwpx - -o 결과.hwpx
 hwpxpb pdf     문서.hwpx -o 문서.pdf
 ```

@@ -671,6 +671,14 @@ public:
 		if (m_ready) Call(L"setShowMenu", {m_showMenu ? L"true" : L"false"});
 		return S_OK;
 	}
+	// 누름틀 묶음(이름 컬럼__x) 값을 잇고 나누는 구분자. 기본 "|", "" 이면 기본값
+	STDMETHOD(get_GroupSep)(BSTR* value) { return Ret(value, m_groupSep); }
+	STDMETHOD(put_GroupSep)(BSTR value) {
+		m_groupSep = Str(value);
+		if (m_groupSep.empty()) m_groupSep = L"|";
+		if (m_ready) Call(L"setGroupSep", {Js(m_groupSep)});
+		return S_OK;
+	}
 	STDMETHOD(get_AllowEdit)(VARIANT_BOOL* value) { return Ret(value, m_allowEdit); }
 	STDMETHOD(put_AllowEdit)(VARIANT_BOOL value) {
 		m_allowEdit = value != VARIANT_FALSE;
@@ -912,6 +920,7 @@ private:
 	bool m_landscape = false;
 	bool m_allowEdit = false;
 	bool m_showMenu = false;
+	std::wstring m_groupSep = L"|";
 	int m_callDepth = 0;
 	std::map<int, Result> m_results;
 	std::vector<PendingEvent> m_events;
@@ -1132,8 +1141,9 @@ private:
 	void ApplySettings() {
 		if (!m_web) return;
 		std::wstring script =
-			std::wstring(L"window.hwpBridge.setShowMenu(") + (m_showMenu ? L"true" : L"false") +
-			L").then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") +
+			L"window.hwpBridge.setGroupSep(" + Js(m_groupSep) +
+			L").then(function(){return window.hwpBridge.setShowMenu(" + (m_showMenu ? L"true" : L"false") +
+			L");}).then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") +
 			L");}).then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})"
 			L".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
 		m_web->ExecuteScript(script.c_str(), nullptr);

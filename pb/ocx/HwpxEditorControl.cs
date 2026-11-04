@@ -42,6 +42,8 @@ namespace Hwpxpb
         // 문서 전체 편집 권한. false(기본)면 작성(form)·보기(view)만 되고 Open/SetMode 의 "edit" 는 실패한다
         [DispId(15)] bool AllowEdit { get; set; }
         [DispId(32)] bool ShowMenu { get; set; }
+        // 누름틀 묶음(이름 컬럼__x) 값을 잇고 나누는 구분자. 기본 "|", "" 이면 기본값
+        [DispId(41)] string GroupSep { get; set; }
         // PB 12.1 에는 JSON 파서가 없으므로 JSON 없이 쓰는 메서드
         [DispId(20)] string GetFieldValue(string column, string comboSep);
         [DispId(21)] bool SetFieldValue(string column, string value, string comboSep);
@@ -121,6 +123,18 @@ namespace Hwpxpb
             }
         }
 
+        private string _groupSep = "|";
+        /// <summary>누름틀 묶음(컬럼__x) 값을 잇고 나누는 구분자. 기본 "|"</summary>
+        public string GroupSep
+        {
+            get => _groupSep;
+            set
+            {
+                _groupSep = string.IsNullOrEmpty(value) ? "|" : value;
+                if (_ready) Call("setGroupSep", _groupSep);
+            }
+        }
+
         private bool _showMenu;
         /// <summary>편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지</summary>
         public bool ShowMenu
@@ -186,8 +200,9 @@ namespace Hwpxpb
                 case "ready":
                     // PB 의 Ready 이벤트는 메뉴·권한 설정이 모두 끝난 뒤에만 알린다.
                     // ExecuteScriptAsync 는 반환된 Promise 의 완료를 기다리지 않으므로 JS 에서 완료 이벤트를 보낸다.
-                    var setupScript = "window.hwpBridge.setShowMenu(" + (_showMenu ? "true" : "false") +
-                        ").then(function(){return window.hwpBridge.setPermission(" + (_allowEdit ? "true" : "false") +
+                    var setupScript = "window.hwpBridge.setGroupSep(" + _json.Serialize(_groupSep) +
+                        ").then(function(){return window.hwpBridge.setShowMenu(" + (_showMenu ? "true" : "false") +
+                        ");}).then(function(){return window.hwpBridge.setPermission(" + (_allowEdit ? "true" : "false") +
                         ");}).then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})" +
                         ".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
                     _web.CoreWebView2.ExecuteScriptAsync(setupScript);

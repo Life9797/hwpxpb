@@ -10,7 +10,7 @@
 // 권한: 편집 권한(setPermission(true))이 있어야 자유 편집(edit)으로 바꿀 수 있다. 기본은 권한 없음.
 // 권한이 없으면 어떤 모드에서든 결과 문서는 "원본 양식 + 값" 이라 본문을 고쳐도 반영되지 않는다.
 import { createStudio } from './vendor/rhwp-editor/index.js';
-import { HwpxDocument } from './vendor/engine/index.js';
+import { GROUP_SEP, HwpxDocument } from './vendor/engine/index.js';
 
 const STUDIO_URL = new URL('./studio/', location.href).href;
 
@@ -21,6 +21,7 @@ const state = {
   mode: 'form', // form | edit | view
   allowEdit: false, // 문서 전체 편집 권한 (PB 는 OCX AllowEdit, 브라우저는 서버 /api/permission)
   showMenu: false, // 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 줄지 (OCX ShowMenu)
+  groupSep: GROUP_SEP, // 누름틀 묶음(컬럼__x) 값을 잇는 구분자 (OCX GroupSep)
   resetInProgress: false,
   closed: false, // CloseDocument 로 닫은 뒤 다시 열기 전까지
 };
@@ -154,7 +155,7 @@ async function currentBytes() {
 
 /** 에디터 화면에 보이는 값 (DB 컬럼 기준) */
 async function readValues(comboSep) {
-  return new HwpxDocument(await currentBytes()).extract({ comboSep });
+  return new HwpxDocument(await currentBytes()).extract({ comboSep, groupSep: state.groupSep });
 }
 
 /** 화면에 보이는 값을 개체 단위 그대로 doc 에 옮긴다 (컬럼 값으로 바꾸지 않아 묶음 누름틀의 "," 등도 안 깨진다) */
@@ -223,6 +224,12 @@ const api = {
     return { ok: true, showMenu: state.showMenu };
   },
 
+  /** 누름틀 묶음(컬럼__x) 값을 잇고 나누는 구분자. "" 이면 기본값 "|" */
+  async setGroupSep(sep) {
+    state.groupSep = sep == null || sep === '' ? GROUP_SEP : String(sep);
+    return { ok: true, groupSep: state.groupSep };
+  },
+
   /** 문서 전체 편집 권한을 준다(true)/뺀다(false). 빼면 자유 편집 중이던 화면은 작성(form)으로 돌아간다 */
   async setPermission(canEdit) {
     state.allowEdit = canEdit === true || canEdit === 'true' || canEdit === '1';
@@ -277,6 +284,7 @@ const api = {
       state.mode = 'form';
       state.allowEdit = false;
       state.showMenu = false;
+      state.groupSep = GROUP_SEP;
       Object.assign(keys, DEFAULT_KEYS);
       const root = document.querySelector('#editor');
       if (!root) throw new Error('#editor 요소를 찾을 수 없습니다');
@@ -323,7 +331,7 @@ const api = {
       // 화면에서 이미 입력한 값은 살리고, 새 값만 덮어쓴다
       await restoreShown(doc, comboSep);
     }
-    const result = doc.fill(values, { comboSep });
+    const result = doc.fill(values, { comboSep, groupSep: state.groupSep });
     await load(doc.toBytes());
     return { ok: true, ...result };
   },

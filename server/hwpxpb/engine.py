@@ -7,7 +7,7 @@ DB 매핑 규칙
   테이블명  문서 정보(키워드/설명)에 "dbtable=테이블명"
   누름틀·드롭다운·단독 체크박스  개체 이름 = 컬럼명 (단독 체크박스 값은 Y/N)
   다중 체크박스  이름 "컬럼__코드" → 체크된 코드를 "01,02" 로
-  누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "," 로 이어서 (구분자 group_sep 로 바꿀 수 있음)
+  누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "|" 로 이어서 (구분자는 group_sep 로 바꿀 수 있음)
   라디오  그룹 이름 = 컬럼, 선택된 버튼의 이름 = 값 ("컬럼__값" 도 허용)
   드롭다운  항목 "코드<구분자>표시" (구분자 기본 ":"), 값은 코드. 코드만 줘도 항목 선택
 """
@@ -19,6 +19,7 @@ import zipfile
 from typing import Any, Iterator
 
 SEP = "__"
+GROUP_SEP = "|"  # 누름틀 묶음 값의 기본 구분자
 SECTION_RE = re.compile(r"^Contents/section\d+\.xml$")
 FIELD_BEGIN_RE = re.compile(r'<hp:fieldBegin\b[^>]*\btype="CLICK_HERE"[^>]*>')
 FORM_RE = re.compile(r"<hp:(checkBtn|radioBtn|comboBox)\b[^>]*>")
@@ -332,7 +333,7 @@ class HwpxDocument:
             self._set_xml(s, _apply_edits(xml, edits))
         return self
 
-    def extract(self, combo_sep: str = ":", group_sep: str = ",") -> dict:
+    def extract(self, combo_sep: str = ":", group_sep: str = GROUP_SEP) -> dict:
         """DB 컬럼 기준 추출: {table, values:{컬럼: 값}}"""
         raw = self.extract_raw()
         kinds = {x["name"]: x for x in self.schema()}
@@ -366,7 +367,7 @@ class HwpxDocument:
                 out[k] = "" if all(x == "" for x in v) else join_with[k].join(v)
         return {"table": self.db_table, "values": out}
 
-    def fill(self, values: dict[str, Any], combo_sep: str = ":", group_sep: str = ",") -> dict:
+    def fill(self, values: dict[str, Any], combo_sep: str = ":", group_sep: str = GROUP_SEP) -> dict:
         """DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 목록)"""
         items = self.schema()
         raw: dict[str, Any] = {}

@@ -7,12 +7,14 @@
 //   테이블명  문서 정보(키워드/설명)에 "dbtable=테이블명"
 //   누름틀·드롭다운·단독 체크박스  개체 이름 = 컬럼명 (단독 체크박스 값은 Y/N)
 //   다중 체크박스  이름 "컬럼__코드" → 체크된 코드를 "01,02" 로
-//   누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "," 로 이어서 (구분자 groupSep 로 바꿀 수 있음)
+//   누름틀 묶음  이름 "컬럼__아무거나" → 문서 순서대로 값을 "|" 로 이어서 (구분자는 groupSep 로 바꿀 수 있음)
 //   라디오  그룹 이름 = 컬럼, 선택된 버튼의 이름 = 값 ("컬럼__값" 도 허용)
 //   드롭다운  항목 "코드<구분자>표시" (구분자 기본 ":"), 값은 코드. 코드만 줘도 항목 선택
 import { unzipSync, zipSync } from 'fflate';
 
 export const SEP = '__';
+/** 누름틀 묶음 값의 기본 구분자 */
+export const GROUP_SEP = '|';
 const SECTION_RE = /^Contents\/section\d+\.xml$/;
 const FIELD_BEGIN_RE = /<hp:fieldBegin\b[^>]*\btype="CLICK_HERE"[^>]*>/g;
 const FORM_RE = /<hp:(checkBtn|radioBtn|comboBox)\b[^>]*>/g;
@@ -306,7 +308,7 @@ export class HwpxDocument {
   }
 
   /** DB 컬럼 기준 추출: {table, values:{컬럼: 값}} */
-  extract({ comboSep = ':', groupSep = ',' } = {}) {
+  extract({ comboSep = ':', groupSep = GROUP_SEP } = {}) {
     const raw = this.extractRaw();
     const kinds = new Map(this.schema().map((x) => [x.name, x]));
     const out = {};
@@ -337,7 +339,7 @@ export class HwpxDocument {
   }
 
   /** DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 배열) */
-  fill(values, { comboSep = ':', groupSep = ',' } = {}) {
+  fill(values, { comboSep = ':', groupSep = GROUP_SEP } = {}) {
     const items = this.schema();
     const raw = {};
     const known = new Set();

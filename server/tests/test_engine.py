@@ -22,6 +22,18 @@ def open_doc() -> HwpxDocument:
 
 
 class EngineTest(unittest.TestCase):
+    def test_clickhere_group(self):
+        doc = HwpxDocument(make_hwpx(group=True))
+        self.assertEqual(doc.extract()["values"]["ADDR"], "|강남구|")
+        res = doc.fill({"ADDR": "서울시|서초구|반포대로 1, 101호|별관"})
+        self.assertEqual(res, {"applied": ["ADDR"], "unknown": [], "rejected": []})
+        raw = HwpxDocument(doc.to_bytes()).extract_raw()
+        self.assertEqual([raw["ADDR__1"], raw["ADDR__2"], raw["ADDR__3"]], ["서울시", "서초구", "반포대로 1, 101호|별관"])
+        doc.fill({"ADDR": "대구,중구"}, group_sep=",")
+        self.assertEqual(HwpxDocument(doc.to_bytes()).extract()["values"]["ADDR"], "대구|중구|")
+        doc.fill({"ADDR": ""})
+        self.assertEqual(HwpxDocument(doc.to_bytes()).extract()["values"]["ADDR"], "")
+
     def test_schema(self):
         by_name = {x["name"]: x for x in open_doc().schema()}
         self.assertEqual(by_name["PT_NM"]["type"], "clickhere")

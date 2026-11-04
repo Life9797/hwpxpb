@@ -93,6 +93,15 @@ class ApiTest(unittest.TestCase):
         r, data = self.call("GET", "/api/templates/rx01")
         self.assertEqual(data, make_hwpx())
 
+    def test_group_sep(self):
+        tpl = base64.b64encode(make_hwpx(group=True)).decode()
+        r, data = self.call("POST", "/api/fill", {"template": tpl, "values": {"ADDR": "서울시,강남구,역삼동"}, "groupSep": ","})
+        self.assertEqual(r.status, 200)
+        r, out = self.call("POST", "/api/extract", data)
+        self.assertEqual(json.loads(out)["values"]["ADDR"], "서울시|강남구|역삼동")  # 기본 구분자 |
+        r, out = self.call("POST", "/api/extract?groupSep=,", data)
+        self.assertEqual(json.loads(out)["values"]["ADDR"], "서울시,강남구,역삼동")
+
     def test_strict_422(self):
         r, data = self.call("POST", "/api/fill", {"template": base64.b64encode(make_hwpx()).decode(), "values": {"NOPE": 1}, "strict": True})
         self.assertEqual(r.status, 422)

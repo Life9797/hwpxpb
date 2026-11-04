@@ -26,7 +26,7 @@ CASES = [
     ({"PT_NM": '홍<길>동 & "1"', "MEMO": "첫줄\n둘째줄", "AGREE_YN": "Y", "ITEM_CD": "01,02", "SEX_CD": "F", "REGION_CD": "02", "NOPE": 1}, ":"),
     ({"REGION_CD": "03", "SEX_CD": "남", "RESULT": "", "PT_NM": 175.5}, "|"),
     ({"REGION_CD": "99", "SEX_CD": "X", "AGREE_YN": "N", "ITEM_CD": ""}, ":"),
-    ({"ADDR": "서울시,서초구,반포대로 1, 101호"}, ":"),
+    ({"ADDR": "서울시|서초구|반포대로 1, 101호|별관"}, ":"),
     ({"ADDR": "부산시", "ITEM_CD__01": "Y"}, ":"),
     ({"ADDR": ""}, ":"),
 ]
@@ -56,7 +56,7 @@ class ParityTest(unittest.TestCase):
         for it in HwpxDocument(data).schema():
             if it["type"] == "clickhere" and "__" in it["name"]:
                 col = it["name"].split("__")[0]
-                own[col] = (own[col] + "," if col in own else "") + f"값 {it['name']}"
+                own[col] = (own[col] + "|" if col in own else "") + f"값 {it['name']}"
             elif it["type"] == "clickhere":
                 own[it["name"]] = f"값 {it['name']}\n<&>"
             elif it["type"] == "checkbox":
