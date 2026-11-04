@@ -38,7 +38,14 @@ def _para(body):
     )
 
 
-def make_hwpx(keyword="dbtable=TB_TEST") -> bytes:
+def make_hwpx(keyword="dbtable=TB_TEST", group=False) -> bytes:
+    """group=True 면 누름틀 묶음 ADDR__1~3 (둘째 칸은 입력됨)을 덧붙인다"""
+    extra = (
+        _para(_click_here(201, "ADDR__1", "시도", "시도") + _click_here(202, "ADDR__2", "구군", "강남구", dirty=1))
+        + _para(_click_here(203, "ADDR__3", "상세", "상세"))
+        if group
+        else ""
+    )
     section = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>'
         '<hs:sec xmlns:hs="http://www.hancom.co.kr/hwpml/2011/section" xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">'
@@ -56,6 +63,7 @@ def make_hwpx(keyword="dbtable=TB_TEST") -> bytes:
                 inner='<hp:listItem displayText="" value="01:서울"/><hp:listItem displayText="" value="02:부산"/><hp:listItem displayText="" value="03|대구"/>',
             )
         )
+        + extra
         + "</hs:sec>"
     )
     hpf = (

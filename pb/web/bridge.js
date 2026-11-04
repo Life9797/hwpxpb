@@ -157,12 +157,16 @@ async function readValues(comboSep) {
   return new HwpxDocument(await currentBytes()).extract({ comboSep });
 }
 
+/** 화면에 보이는 값을 개체 단위 그대로 doc 에 옮긴다 (컬럼 값으로 바꾸지 않아 묶음 누름틀의 "," 등도 안 깨진다) */
+async function restoreShown(doc, comboSep) {
+  doc.fillRaw(new HwpxDocument(await currentBytes()).extractRaw(), { comboSep });
+}
+
 /** 결과 문서: 양식 모드면 원본 양식에 값만 다시 넣고, 편집 모드면 에디터가 쓴 그대로 */
 async function buildDocument(comboSep) {
   if (!rebuildFromTemplate()) return currentBytes();
-  const { values } = await readValues(comboSep);
   const doc = new HwpxDocument(state.template);
-  doc.fill(values, { comboSep });
+  await restoreShown(doc, comboSep);
   return doc.toBytes();
 }
 
@@ -317,8 +321,7 @@ const api = {
     const doc = new HwpxDocument(base);
     if (rebuildFromTemplate()) {
       // 화면에서 이미 입력한 값은 살리고, 새 값만 덮어쓴다
-      const shown = await readValues(comboSep);
-      doc.fill(shown.values, { comboSep });
+      await restoreShown(doc, comboSep);
     }
     const result = doc.fill(values, { comboSep });
     await load(doc.toBytes());
