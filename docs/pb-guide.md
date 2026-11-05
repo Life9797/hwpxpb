@@ -56,7 +56,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 
 | 메서드 | 설명 |
 |---|---|
-| `Open(path, mode)` | 파일 열기. mode = `form`(작성: 값만 입력, 기본) / `edit`(편집: 문서 전체, **AllowEdit 필요**) / `view` |
+| `Open(path, mode)` | 파일 열기. mode = `form`(작성: 값만 입력, 기본) / `edit`(편집: 문서 전체, **AllowEdit 필요**) / `view`(보기: 읽기 전용). `"작성"`/`"편집"`/`"보기"` 로 써도 됨 |
 | `AllowEdit` (속성) | 문서 전체 편집 권한. 기본 `false` = 작성만. PB 의 사용자 권한에 따라 `true` 로 둠 (아래 "편집 권한") |
 | `GroupSep` (속성) | 누름틀 묶음(이름 `컬럼__x`) 값을 잇고 나누는 구분자. 기본 `"\|"`, `""` 이면 기본값. 아래 5절 |
 | `ShowMenu` (속성) | 원래 에디터 메뉴·도구 모음 표시. 권한 없는 사용자에게는 항상 숨김. 권한자는 편집 모드에서 보이고, `true` 면 작성 모드에서도 보임. 기본 `false` |
@@ -82,7 +82,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `GetDefaultPrinter()` | 기본 프린터 이름 |
 | `SetKeys(nextObject, prevObject, nextField, prevField)` | 양식 입력에서 옮겨 다닐 키. `""` 는 그대로, `"none"` 은 끔 (아래 8절) |
 | `MoveObject(delta)` | 다음(1)/이전(-1) 선택 개체로 이동. 버튼 등에서 부를 때 |
-| `SetMode(mode)` | 모드 바꾸기 (`edit` 는 AllowEdit 가 true 일 때만) |
+| `SetMode(mode)` | 모드 바꾸기 `form` / `edit` / `view` (`edit` 는 AllowEdit 가 true 일 때만) |
 | `SetEditMode(edit)` | `true` 면 편집(`edit`, **AllowEdit 필요**), `false` 면 작성(`form`). 성공하면 true |
 | `GetMode()` | 지금 모드 `form` / `edit` / `view` |
 | `LastError` | 마지막 오류 메시지 |
@@ -93,9 +93,10 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 `comboSep` 은 드롭다운 항목의 코드 구분자입니다. 빈 문자열이면 `:` 를 씁니다.
 항목이 `01:서울` 이면 값은 `01`, 넣을 때도 `01` 만 주면 됩니다.
 
-### 편집 권한 (작성 / 편집)
+### 모드와 편집 권한 (작성 / 편집 / 보기)
 - **작성**(`form`): 누름틀·체크박스·라디오·드롭다운 값만 넣습니다. 저장 파일은 항상 "원본 양식 + 입력값" 이라 본문·서식은 바뀌지 않습니다.
 - **편집**(`edit`): 문서 전체(본문, 표, 서식)를 고칩니다. 메뉴와 도구 상자가 보입니다.
+- **보기**(`view`): 읽기 전용. 화면에서 글자 입력·붙여넣기·클릭(체크박스 등)이 막히고, 스크롤·이동 키·복사(Ctrl+C)만 됩니다. 권한 없이 누구나 쓸 수 있습니다. PB 에서 부르는 `SetFields`·`GetFields`·`SaveAs`·`Print` 등은 보기에서도 그대로 동작하므로, 값을 넣어 보여 주기만 할 때 씁니다.
 - `AllowEdit` 가 `false`(기본)면 `Open(..., "edit")`, `SetMode("edit")` 는 false 를 돌려주고 `LastError` 에 "편집 권한이 없습니다" 가 들어갑니다. 이때는 어떤 모드든 저장 결과가 "원본 양식 + 입력값" 입니다.
 - 편집 중에 `AllowEdit = false` 로 바꾸면 작성으로 돌아갑니다.
 - 시작할 때는 에디터 화면을 숨겨 두었다가 메뉴 설정이 끝난 뒤 보여 주므로, 원래 메뉴가 잠깐 보였다 사라지지 않습니다.
@@ -103,9 +104,11 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 ```powerscript
 // 사용자 권한에 따라 (권한 확인은 PB 앱의 사용자 테이블 등에서)
 ole_hwp.object.AllowEdit = (gs_user_role = "ADMIN")
-// 권한이 있으면 작성/편집을 고르게: ddlb_mode 에 "작성"(form), "편집"(edit)
-ddlb_mode.Visible = ole_hwp.object.AllowEdit
+// 작성/편집/보기를 고르게: ddlb_mode 에 "작성"(form), "편집"(edit, 권한자만), "보기"(view)
 ...
+ole_hwp.object.Open(ls_file, "view")   // 보기(읽기 전용)로 열기
+ole_hwp.object.Open(ls_file, ddlb_mode.Text)   // "작성"/"편집"/"보기" 글자 그대로도 됨
+ole_hwp.object.SetMode("view")    // 보던 문서를 읽기 전용으로
 ole_hwp.object.SetMode("edit")    // 권한이 없으면 false
 ole_hwp.object.SetEditMode(true)  // 위와 같음. false 면 작성으로
 ls_mode = string(ole_hwp.object.GetMode())   // form / edit / view

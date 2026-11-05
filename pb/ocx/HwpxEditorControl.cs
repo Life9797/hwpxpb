@@ -25,6 +25,7 @@ namespace Hwpxpb
     [InterfaceType(ComInterfaceType.InterfaceIsDual)]
     public interface IHwpxEditor
     {
+        // mode: "form"(작성, 기본) / "edit"(편집, AllowEdit 필요) / "view"(보기, 읽기 전용). "작성"/"편집"/"보기" 도 됨
         [DispId(1)] bool Open(string path, string mode);
         [DispId(2)] bool OpenBase64(string base64, string fileName, string mode);
         [DispId(3)] bool SetMode(string mode);

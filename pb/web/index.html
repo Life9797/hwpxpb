@@ -45,9 +45,10 @@
     <button id="btn-open" disabled>열기</button>
     <input id="file-input" type="file" accept=".hwpx" hidden />
     <!-- 편집 권한이 있을 때만 보인다. 권한이 없으면 작성(양식 입력)만 -->
-    <select id="sel-mode" disabled hidden title="작성: 칸·선택 개체만 입력 / 편집: 문서 전체를 고침">
+    <select id="sel-mode" disabled title="작성: 칸·선택 개체만 입력 / 편집: 문서 전체를 고침 / 보기: 읽기 전용">
       <option value="form">작성 (양식 입력)</option>
-      <option value="edit">편집 (문서 전체)</option>
+      <option value="edit" hidden disabled>편집 (문서 전체)</option>
+      <option value="view">보기 (읽기 전용)</option>
     </select>
     <span id="role" title="편집 권한은 관리자가 서버에 설정합니다"></span>
     <span class="sep"></span>

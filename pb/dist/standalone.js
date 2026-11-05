@@ -9,6 +9,7 @@
 //   http://서버:8080/?template=rx01      서버에 등록된 양식 (/api/templates/rx01)
 //   index.html?src=<HWPX 주소>           임의 주소의 HWPX
 //   &mode=edit                          편집(문서 전체)으로 열기. 편집 권한이 있을 때만 (기본: 작성)
+//   &mode=view                          보기(읽기 전용)로 열기
 //   &key=<API 키>                       서버에 API_KEY 를 설정했을 때. 편집 권한도 이 키로 정한다
 //
 // 편집 권한은 서버의 /api/permission 이 정한다 (EDIT_KEYS, EDIT_USERS). 권한이 없거나 서버 없이
@@ -155,9 +156,10 @@ if (!window.chrome?.webview) {
       if (res.ok) canEdit = (await res.json()).canEdit === true;
     } catch {}
     await call('setPermission', canEdit);
-    $('sel-mode').hidden = !canEdit;
+    const editOpt = $('sel-mode').querySelector('option[value="edit"]');
+    editOpt.hidden = editOpt.disabled = !canEdit;
     $('sel-mode').value = 'form';
-    $('role').textContent = canEdit ? '' : '작성 전용';
+    $('role').textContent = canEdit ? '' : '작성·보기 전용';
     return canEdit;
   }
 
@@ -221,8 +223,9 @@ if (!window.chrome?.webview) {
   window.addEventListener('keydown', onKey, true);
 
   await ready();
-  const deniedEdit = params.get('mode') === 'edit' && $('sel-mode').hidden;
-  if (params.get('mode') && !deniedEdit) $('sel-mode').value = params.get('mode');
+  const wantMode = params.get('mode');
+  const modeOpt = wantMode && $('sel-mode').querySelector(`option[value="${CSS.escape(wantMode)}"]`);
+  if (modeOpt && !modeOpt.disabled) $('sel-mode').value = wantMode;
   const template = params.get('template');
   const src = template ? new URL(`/api/templates/${encodeURIComponent(template)}`, location.href).href : params.get('src');
   if (src) {

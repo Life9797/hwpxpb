@@ -108,12 +108,17 @@ End If
 Return True
 end function
 
-public function boolean wf_open (string as_file);// 파일 열기. 작성(form) / 편집(edit, AllowEdit 필요)
+public function boolean wf_open (string as_file);// 파일 열기. 작성(form) / 편집(edit, AllowEdit 필요) / 보기(view, 읽기 전용)
 string ls_mode = "form"
 
 If Not wf_check() Then Return False
 If Trim(as_file) = "" Then Return False
-If cbx_edit.Checked And ddlb_mode.Text = "편집" Then ls_mode = "edit"
+Choose Case ddlb_mode.Text
+	Case "편집"
+		If cbx_edit.Checked Then ls_mode = "edit"
+	Case "보기"
+		ls_mode = "view"
+End Choose
 
 If Not iole.object.Open(as_file, ls_mode) Then
 	MessageBox("열기 실패", String(iole.object.LastError))
@@ -403,7 +408,6 @@ If Left(is_file, 1) = '"' Then is_file = Mid(is_file, 2, Len(is_file) - 2)
 sle_file.Text = is_file
 
 ddlb_mode.SelectItem(1)
-ddlb_mode.Enabled = cbx_edit.Checked
 wf_layout()
 
 If Not IsValid(iole) Then
@@ -518,8 +522,8 @@ string text = "편집 권한"
 end type
 
 event clicked;// 실제 업무에서는 사용자 권한(예: gs_user_role = "ADMIN")으로 정한다
-ddlb_mode.Enabled = This.Checked
-If Not This.Checked Then ddlb_mode.SelectItem(1)
+// 편집 권한을 빼면 편집 중이던 화면은 작성으로 (보기는 그대로)
+If Not This.Checked And ddlb_mode.Text = "편집" Then ddlb_mode.SelectItem(1)
 If IsValid(iole) And ib_ready Then iole.object.AllowEdit = This.Checked
 end event
 
@@ -537,7 +541,7 @@ fontfamily fontfamily = swiss!
 string facename = "맑은 고딕"
 long textcolor = 33554432
 boolean sorted = false
-string item[] = {"작성","편집"}
+string item[] = {"작성","편집","보기"}
 borderstyle borderstyle = stylelowered!
 end type
 
@@ -545,6 +549,7 @@ event selectionchanged;string ls_mode = "form"
 
 If Not ib_ready Then Return
 If This.Text = "편집" Then ls_mode = "edit"
+If This.Text = "보기" Then ls_mode = "view"
 If Not iole.object.SetMode(ls_mode) Then
 	MessageBox("모드", String(iole.object.LastError))
 	This.SelectItem(1)

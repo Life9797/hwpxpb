@@ -51,7 +51,34 @@ out.editDenied = await call('setMode', 'edit');
 await call('setPermission', true);
 out.editMode = await call('setMode', 'edit');
 out.modeAfterEdit = (await call('getPermission')).mode;
-await call('setMode', 'form');
+// 보기(view): 읽기 전용. 에디터 창에 들어가는 입력 중 문서를 바꾸는 것만 막히는지 본다
+// (값: 막혔으면 true. 글자·붙여넣기·클릭은 막고, 이동 키·복사는 둔다)
+const probeInput = () =>
+  page.evaluate(() => {
+    const w = document.querySelector('#editor iframe').contentWindow;
+    const t = w.document.querySelector('textarea') ?? w.document.body;
+    const fire = (ev) => !t.dispatchEvent(ev);
+    const key = (k, o = {}) => fire(new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...o }));
+    return {
+      typeA: key('a'),
+      enter: key('Enter'),
+      ctrlV: key('v', { ctrlKey: true }),
+      paste: fire(new w.Event('paste', { bubbles: true, cancelable: true })),
+      beforeinput: fire(new w.InputEvent('beforeinput', { inputType: 'insertText', data: 'x', bubbles: true, cancelable: true })),
+      mousedown: fire(new w.MouseEvent('mousedown', { bubbles: true, cancelable: true })),
+      arrowDown: key('ArrowDown'),
+      pageDown: key('PageDown'),
+      ctrlC: key('c', { ctrlKey: true }),
+    };
+  });
+await call('open', b64, 'test.hwpx', '보기'); // "보기" = "view"
+out.viewMode = (await call('getPermission')).mode;
+out.viewBlocks = await probeInput();
+out.viewGetFields = (await call('getFields', ':')).ok;
+out.viewSetFields = (await call('setFields', '{}', ':')).ok;
+await call('setMode', 'edit');
+out.editBlocks = await probeInput();
+await call('open', b64, 'test.hwpx', 'form');
 await call('setPermission', false);
 out.setFields = await call('setFields', valuesJson, ':');
 out.getFields = await call('getFields', ':');

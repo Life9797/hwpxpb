@@ -578,6 +578,7 @@ public:
 
 	// ---- PB 에서 부르는 메서드 ----------------------------------------------------
 
+	/** mode: "form"(작성, 기본) / "edit"(편집, AllowEdit 필요) / "view"(보기, 읽기 전용). "작성"/"편집"/"보기" 도 됨 */
 	STDMETHOD(Open)(BSTR path, BSTR mode, VARIANT_BOOL* result) {
 		std::vector<BYTE> data;
 		std::wstring err;

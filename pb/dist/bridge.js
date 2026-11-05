@@ -7,6 +7,10 @@
 // 양식 모드(form)에서는 문서를 저장·추출할 때 "원본 양식 + 추출한 값" 으로 다시 만든다.
 // 그래서 에디터가 문서를 다시 쓰더라도 결과 파일의 서식은 원본 양식 그대로다.
 //
+// 모드: form(작성: 칸·선택 개체만 입력) / edit(편집: 문서 전체, 권한 필요) / view(보기: 읽기 전용)
+// 보기 모드에서는 화면에서 아무것도 고칠 수 없다(글자 입력·붙여넣기·클릭 막음, 스크롤·복사는 됨).
+// PB 가 부르는 setFields 등은 보기 모드에서도 동작한다.
+//
 // 권한: 편집 권한(setPermission(true))이 있어야 자유 편집(edit)으로 바꿀 수 있다. 기본은 권한 없음.
 // 권한이 없으면 어떤 모드에서든 결과 문서는 "원본 양식 + 값" 이라 본문을 고쳐도 반영되지 않는다.
 import { createStudio } from './vendor/rhwp-editor/index.js';
@@ -34,7 +38,11 @@ async function applyChrome() {
 }
 
 const MODES = ['form', 'edit', 'view'];
+// PB 화면 글자를 그대로 넘겨도 되게 (예: ddlb_mode.Text)
+const MODE_ALIAS = { 작성: 'form', 편집: 'edit', 보기: 'view', readonly: 'view', read: 'view' };
 function checkMode(mode) {
+  mode = String(mode ?? '').trim();
+  mode = MODE_ALIAS[mode] ?? MODE_ALIAS[mode.toLowerCase()] ?? (mode.toLowerCase() || 'form');
   if (!MODES.includes(mode)) throw new Error(`모드는 ${MODES.join(', ')} 중 하나입니다: ${mode}`);
   if (mode === 'edit' && !state.allowEdit) throw new Error('편집 권한이 없습니다 (작성만 할 수 있습니다)');
   return mode;
@@ -112,6 +120,52 @@ function studioWindow() {
   }
 }
 
+// ---- 보기(view) 모드: 읽기 전용 ------------------------------------------------
+// 에디터 창(iframe)에서 문서를 바꿀 수 있는 입력을 가장 먼저(capture) 받아 버린다.
+// 스크롤(휠·스크롤바·이동 키)과 복사(Ctrl+C, Ctrl+A), 저장·인쇄 단축키(Ctrl+S, Ctrl+P)는 둔다.
+const VIEW_KEYS = new Set(['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'pageup', 'pagedown', 'home', 'end']);
+const VIEW_CTRL_KEYS = new Set(['c', 'a', 's', 'p', 'insert']);
+const VIEW_BLOCK_EVENTS = [
+  'beforeinput', 'input', 'compositionstart', 'compositionupdate', 'compositionend',
+  'paste', 'cut', 'drop', 'dragstart', 'dragover',
+  'pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu', 'touchstart',
+];
+const POINTER_EVENTS = new Set(['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick', 'touchstart']);
+
+/** 스크롤바 위를 누른 것인지 (스크롤바 끌기는 막지 않는다) */
+function onScrollbar(e) {
+  const t = e.target;
+  if (!t || typeof t.clientWidth !== 'number' || typeof e.offsetX !== 'number') return false;
+  return (t.clientWidth > 0 && e.offsetX >= t.clientWidth) || (t.clientHeight > 0 && e.offsetY >= t.clientHeight);
+}
+
+function viewAllows(e) {
+  if (e.type === 'keydown' || e.type === 'keyup' || e.type === 'keypress') {
+    const key = String(e.key ?? '').toLowerCase();
+    if (e.ctrlKey || e.metaKey) return !e.altKey && VIEW_CTRL_KEYS.has(key);
+    return !e.altKey && VIEW_KEYS.has(key);
+  }
+  if (POINTER_EVENTS.has(e.type)) return onScrollbar(e);
+  return false;
+}
+
+function onViewGuard(e) {
+  if (state.mode !== 'view' || viewAllows(e)) return;
+  if (e.cancelable) e.preventDefault();
+  e.stopImmediatePropagation();
+}
+
+/** 보기 모드로 들어갈 때 입력 커서를 없앤다 */
+function dropEditorFocus() {
+  try {
+    const w = studioWindow();
+    w?.document?.activeElement?.blur?.();
+    w?.getSelection?.()?.removeAllRanges?.();
+  } catch {
+    // 다른 출처
+  }
+}
+
 function hookEditorKeys() {
   window.addEventListener('keydown', onEditorKeyOnce, true);
   const frame = document.querySelector('#editor iframe');
@@ -119,6 +173,8 @@ function hookEditorKeys() {
     const w = studioWindow();
     if (w && !w.__hwpxpbKeys) {
       w.__hwpxpbKeys = true;
+      // 보기 모드 막기를 먼저 붙여 에디터·다른 키 처리보다 앞서게 한다
+      for (const type of ['keydown', 'keypress', 'keyup', ...VIEW_BLOCK_EVENTS]) w.addEventListener(type, onViewGuard, true);
       w.addEventListener('keydown', onEditorKeyOnce, true);
     }
   };
@@ -149,6 +205,12 @@ async function setFormMode(on) {
   if (Boolean(ctx.isFormMode) !== on) await state.studio.commands.execute('view:form-mode');
 }
 
+/** 지금 모드를 에디터 화면에 맞춘다: 양식 모드 켜기/끄기, 보기 모드면 입력 커서 없앰 */
+async function applyMode() {
+  await setFormMode(state.mode === 'form');
+  if (state.mode === 'view') dropEditorFocus();
+}
+
 async function currentBytes() {
   return state.studio.exportHwpx();
 }
@@ -173,7 +235,7 @@ async function buildDocument(comboSep) {
 
 async function load(bytes, keepMode = true) {
   await state.studio.loadFile(bytes, state.fileName, { suppressDialogs: true, skipUnsavedGuard: true });
-  if (keepMode) await setFormMode(state.mode === 'form');
+  if (keepMode) await applyMode();
 }
 
 /** 출력용 쪽 SVG 목록. 에디터에 출력용 문서를 잠시 열어 그리고, 보던 문서로 되돌린다 */
@@ -195,9 +257,9 @@ async function renderPrintPages(comboSep) {
 }
 
 const api = {
-  /** 문서 열기. b64 = HWPX 파일 내용, mode = form | edit | view */
+  /** 문서 열기. b64 = HWPX 파일 내용, mode = form(작성) | edit(편집, 권한 필요) | view(보기, 읽기 전용) */
   async open(b64, fileName = 'document.hwpx', mode = 'form') {
-    checkMode(mode);
+    mode = checkMode(mode);
     state.template = fromB64(b64);
     state.fileName = fileName;
     state.closed = false;
@@ -212,9 +274,9 @@ const api = {
 
   async setMode(mode) {
     state.mode = checkMode(mode);
-    await setFormMode(mode === 'form');
+    await applyMode();
     await applyChrome();
-    return { ok: true };
+    return { ok: true, mode: state.mode };
   },
 
   /** 편집 권한자에게 작성 모드에서도 원래 메뉴·도구 모음을 보여 준다(true) / 숨긴다(false) */
@@ -249,7 +311,7 @@ const api = {
     state.template = null;
     state.fileName = 'document.hwpx';
     state.closed = true;
-    await setFormMode(state.mode === 'form');
+    await applyMode();
     await applyChrome();
     emit('closed');
     return { ok: true };
