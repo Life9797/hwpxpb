@@ -62,7 +62,16 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `ShowMenu` (속성) | 원래 에디터 메뉴·도구 모음 표시. 권한 없는 사용자에게는 항상 숨김. 권한자는 편집 모드에서 보이고, `true` 면 작성 모드에서도 보임. 기본 `false` |
 | `GetColumns(order)` | DB 컬럼 이름을 탭으로 이어서. `order` = `"document"`(문서에 나오는 순서) / `"created"`(한글에서 개체를 넣은 순서: 누름틀 다음 양식 개체) |
 | `StartupTimes` (속성, C++ 판) | 시작에 걸린 시간: 런타임(WebView2 시작) / 화면(페이지 열기) / 에디터(엔진 준비) / 합계. 준비되면 `Status` 에도 함께 나옴 |
-| `CloseDocument()` | 문서 닫기. 빈 화면이 되고, 다시 `Open` 하기 전까지 값 읽기·저장·인쇄는 false/`""` (`LastError` "열린 문서가 없습니다"). 편집 권한·모드·키 설정은 그대로 |
+| `CloseDocument(askSave)` | 문서 닫기. 빈 화면이 되고, 다시 `Open` 하기 전까지 값 읽기·저장·인쇄는 false/`""` (`LastError` "열린 문서가 없습니다"). 편집 권한·모드·키 설정은 그대로. `askSave` 를 빼거나 `false` 면 묻지 않고 저장 없이 닫고, `true` 면 고친 문서일 때 저장할지 묻습니다 (아래 9절) |
+| `IsModified()` | 사용자가 문서를 고쳤는지. 값 대입(`SetFields` 등)은 고침으로 치지 않음 |
+| `CloseResult` (속성) | 마지막 `CloseDocument` 결과: `"save"`(예) / `"nosave"`(아니오·묻지 않음·고치지 않음) / `"cancel"`(취소) |
+| `ClosedDocumentBase64` (속성) | `CloseResult` 가 `"save"` 일 때 닫은 문서(HWPX) base64. DB BLOB 저장용 |
+| `SaveClosedDocument(path)` | `CloseResult` 가 `"save"` 일 때 닫은 문서를 파일로 저장 |
+| `FitWidth()` | 좌우 여백을 뺀 본문 폭을 화면 폭에 꽉 차게 맞춤. 세로는 스크롤 (아래 10절) |
+| `AutoFit` (속성) | `true` 면 문서를 열거나 값 대입·모드·창 크기가 바뀔 때마다 `FitWidth`. 기본 `false` |
+| `SetShortcutLockModes(on)` | 에디터 단축키 잠금 켜기/끄기. 모든 모드(작성·편집·보기)에 적용 (아래 11절) |
+| `GetShortcutLockModes()` | 단축키 잠금 상태 |
+| `RecoveryEnabled` (속성) | 복구용 자동 저장. 기본 `true`. 값은 PC 에 저장되어 다음 실행에도 쓰임 (아래 12절) |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |
 | `GetFieldValue(column, comboSep)` | 값 하나 읽기 |
@@ -209,3 +218,55 @@ ole_hwp.object.SetKeys("F8", "Shift+F8", "", "")
 ole_hwp.object.SetKeys("", "", "Enter", "Shift+Enter")
 ```
 키 이름: `Ctrl`, `Alt`, `Shift` 와 키를 `+` 로 잇습니다. 예: `Ctrl+Tab`, `F8`, `Alt+N`, `Ctrl+Down`, `PageDown`.
+
+## 9. 닫을 때 저장 여부 묻기
+
+```powerscript
+// 묻지 않고 저장 없이 닫기 (이전과 같음)
+ole_hwp.object.CloseDocument(false)      // 또는 CloseDocument()
+
+// 고친 문서면 에디터 화면에 "변경 내용을 저장할까요?" (예 / 아니오 / 취소)
+If Not ole_hwp.object.CloseDocument(true) Then
+	If string(ole_hwp.object.CloseResult) = "cancel" Then Return 1   // 취소: 문서는 그대로 열려 있음
+	MessageBox("닫기 실패", string(ole_hwp.object.LastError))
+	Return 1
+End If
+If string(ole_hwp.object.CloseResult) = "save" Then
+	ole_hwp.object.SaveClosedDocument("C:\out\처방전_홍길동.hwpx")
+	// DB BLOB 이면: ls_b64 = string(ole_hwp.object.ClosedDocumentBase64)
+End If
+```
+- 사용자가 고치지 않았으면 묻지 않고 닫습니다 (`CloseResult` = `"nosave"`). 값 대입(`SetFields` 등)은 고침으로 치지 않습니다. 미리 확인하려면 `IsModified()`.
+- 창은 PB 가 아니라 에디터 화면 안에 뜹니다. Enter = 예, Esc = 취소.
+- 사용자가 답할 때까지 기다리므로 이 호출에는 `TimeoutSeconds` 가 적용되지 않습니다.
+- "예" 의 문서는 `SaveAs` 와 같습니다 (작성 모드면 원본 양식 + 입력값). 드롭다운 코드 구분자는 `:` 입니다.
+
+## 10. 본문 폭에 맞추기
+
+`FitWidth()` 는 좌우 여백을 뺀 본문 폭이 화면 폭에 꽉 차도록 배율을 정하고, 본문 왼쪽 끝을 화면 왼쪽에 맞춥니다. 세로는 스크롤합니다.
+여백은 화면 가운데에 보이는 쪽의 것을 씁니다.
+```powerscript
+ole_hwp.object.FitWidth()          // 지금 한 번
+ole_hwp.object.AutoFit = True      // 열기·값 대입·모드 변경·창 크기 변경 때마다 자동으로
+```
+
+## 11. 단축키 잠금
+
+```powerscript
+ole_hwp.object.SetShortcutLockModes(True)    // 잠금
+ole_hwp.object.SetShortcutLockModes(False)   // 풀기 (기본)
+lb_locked = ole_hwp.object.GetShortcutLockModes()
+```
+- 막는 키: Ctrl·Alt 조합 (Ctrl+S/O/N/P/Z/C/V, Ctrl+G 등)과 F1~F24. 작성·편집·보기 모든 모드에 적용됩니다.
+- 그대로 되는 키: 글자 입력(한글 포함), 방향키, Tab, Enter, Backspace, Delete, Esc, 그리고 `SetKeys` 로 정한 양식 이동 키.
+
+## 12. 복구용 자동 저장
+
+에디터는 편집 중 복구본을 자동 저장하고(10분마다, 10초 쉴 때), 프로그램이 비정상 종료된 뒤 다시 시작하면
+"저장되지 않은 문서 복구본이 있습니다" 라고 묻습니다.
+```powerscript
+ole_hwp.object.RecoveryEnabled = False   // 끄기: 복구본을 만들지 않고, 남은 복구본도 지움 → 시작할 때 묻지 않음
+ole_hwp.object.RecoveryEnabled = True    // 켜기 (기본)
+```
+- 값은 PC(WebView2 사용자 데이터)에 저장되어 다음 실행에도 쓰입니다. 시작할 때 묻는 창은 PB 가 속성을 정하기 전에 뜰 수 있으므로, 끈 값은 **다음 실행부터** 확실히 적용됩니다.
+- `CloseDocument` 로 정상적으로 닫은 문서의 복구본은 지웁니다 (다음에 묻지 않음).

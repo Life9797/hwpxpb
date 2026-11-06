@@ -50,11 +50,31 @@ interface IHwpxEditor : IDispatch
 	[id(35)] HRESULT GetTableFromFile([in] BSTR path, [out, retval] BSTR* result);
 	[id(36)] HRESULT SetEditMode([in] VARIANT_BOOL edit, [out, retval] VARIANT_BOOL* result);
 	[id(37)] HRESULT GetMode([out, retval] BSTR* result);
-	[id(38)] HRESULT CloseDocument([out, retval] VARIANT_BOOL* result);
+	// askSave 를 빼면 false: 묻지 않고 저장 없이 닫는다. true 면 고친 문서일 때 저장할지 묻는다 (CloseResult)
+	[id(38)] HRESULT CloseDocument([in, defaultvalue(0)] VARIANT_BOOL askSave, [out, retval] VARIANT_BOOL* result);
 	[id(39)] HRESULT SelectPrinter([out, retval] BSTR* result);
 	[id(40)] HRESULT PrintDialog([out, retval] VARIANT_BOOL* result);
 	[id(41), propget] HRESULT GroupSep([out, retval] BSTR* value);
 	[id(41), propput] HRESULT GroupSep([in] BSTR value);
+	// 좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다 (세로는 스크롤)
+	[id(42)] HRESULT FitWidth([out, retval] VARIANT_BOOL* result);
+	// true 면 문서를 열거나 모드·창 크기가 바뀔 때마다 FitWidth
+	[id(43), propget] HRESULT AutoFit([out, retval] VARIANT_BOOL* value);
+	[id(43), propput] HRESULT AutoFit([in] VARIANT_BOOL value);
+	// 사용자가 문서를 고쳤는지 (값 대입은 고침으로 치지 않음)
+	[id(44)] HRESULT IsModified([out, retval] VARIANT_BOOL* result);
+	// 마지막 CloseDocument 결과: "save"(예) / "nosave"(아니오·묻지 않음·고치지 않음) / "cancel"(취소)
+	[id(45), propget] HRESULT CloseResult([out, retval] BSTR* value);
+	// CloseResult 가 "save" 일 때 닫은 문서(HWPX)의 base64
+	[id(46), propget] HRESULT ClosedDocumentBase64([out, retval] BSTR* value);
+	// CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장
+	[id(47)] HRESULT SaveClosedDocument([in] BSTR path, [out, retval] VARIANT_BOOL* result);
+	// 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 모든 모드에 적용
+	[id(48)] HRESULT SetShortcutLockModes([in] VARIANT_BOOL on, [out, retval] VARIANT_BOOL* result);
+	[id(49)] HRESULT GetShortcutLockModes([out, retval] VARIANT_BOOL* result);
+	// 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
+	[id(50), propget] HRESULT RecoveryEnabled([out, retval] VARIANT_BOOL* value);
+	[id(50), propput] HRESULT RecoveryEnabled([in] VARIANT_BOOL value);
 };
 
 [

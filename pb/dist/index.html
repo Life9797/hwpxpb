@@ -26,6 +26,14 @@
     #keys-dialog input:focus { outline: 2px solid #1a73e8; }
     #keys-dialog menu { display: flex; gap: 6px; justify-content: flex-end; padding: 0; margin: 12px 0 0; }
     #keys-dialog menu button { font: inherit; padding: 4px 12px; }
+    #save-dialog { border: 1px solid #b8bec7; border-radius: 6px; padding: 18px 22px 14px; min-width: 300px; max-width: 460px; box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+    #save-dialog::backdrop { background: rgba(0,0,0,.25); }
+    #save-dialog p { margin: 0 0 4px; }
+    #save-dialog [data-name] { color: #555; font-size: 13px; word-break: break-all; }
+    #save-dialog menu { display: flex; gap: 6px; justify-content: flex-end; padding: 0; margin: 16px 0 0; }
+    #save-dialog menu button { font: inherit; min-width: 72px; padding: 5px 12px; border: 1px solid #b8bec7; border-radius: 4px; background: #fff; cursor: pointer; }
+    #save-dialog menu button[value="yes"] { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+    #save-dialog menu button:focus-visible { outline: 2px solid #1a73e8; outline-offset: 2px; }
     #print-area { display: none; }
     @media print {
       @page { margin: 0; }
@@ -76,6 +84,18 @@
         <button type="button" id="keys-default">기본값</button>
         <button value="cancel">취소</button>
         <button value="ok" id="keys-ok">저장</button>
+      </menu>
+    </form>
+  </dialog>
+  <!-- 문서를 닫을 때 저장 여부 (bridge.js close(true)). Enter = 예, Esc = 취소 -->
+  <dialog id="save-dialog">
+    <form method="dialog">
+      <p>변경 내용을 저장할까요?</p>
+      <p data-name></p>
+      <menu>
+        <button value="yes">예</button>
+        <button value="no">아니오</button>
+        <button value="cancel">취소</button>
       </menu>
     </form>
   </dialog>

@@ -57,7 +57,25 @@ namespace Hwpxpb
         // 지금 모드: form | edit | view
         [DispId(37)] string GetMode();
         // 문서 닫기 (빈 화면). 다시 Open 하기 전까지 값 읽기·저장·인쇄는 실패
-        [DispId(38)] bool CloseDocument();
+        // askSave 를 빼면 false: 묻지 않고 저장 없이 닫는다. true 면 고친 문서일 때 저장할지 묻는다 (CloseResult)
+        [DispId(38)] bool CloseDocument([Optional, DefaultParameterValue(false)] bool askSave);
+        // 좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다 (세로는 스크롤)
+        [DispId(42)] bool FitWidth();
+        // true 면 문서를 열거나 모드·창 크기가 바뀔 때마다 FitWidth
+        [DispId(43)] bool AutoFit { get; set; }
+        // 사용자가 문서를 고쳤는지 (값 대입은 고침으로 치지 않음)
+        [DispId(44)] bool IsModified();
+        // 마지막 CloseDocument 결과: "save"(예) / "nosave"(아니오·묻지 않음·고치지 않음) / "cancel"(취소)
+        [DispId(45)] string CloseResult { get; }
+        // CloseResult 가 "save" 일 때 닫은 문서(HWPX)의 base64
+        [DispId(46)] string ClosedDocumentBase64 { get; }
+        // CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장
+        [DispId(47)] bool SaveClosedDocument(string path);
+        // 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 모든 모드에 적용
+        [DispId(48)] bool SetShortcutLockModes(bool on);
+        [DispId(49)] bool GetShortcutLockModes();
+        // 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
+        [DispId(50)] bool RecoveryEnabled { get; set; }
         // Windows 프린터 선택 창. 고른 프린터 이름 (취소하면 "")
         [DispId(39)] string SelectPrinter();
         // 프린터 선택 창에서 프린터·매수를 고른 뒤 바로 인쇄. 취소하면 false
@@ -147,6 +165,48 @@ namespace Hwpxpb
             }
         }
 
+        private bool _autoFit;
+        /// <summary>문서를 열거나 모드·창 크기가 바뀔 때마다 본문 폭 맞춤</summary>
+        public bool AutoFit
+        {
+            get => _autoFit;
+            set
+            {
+                _autoFit = value;
+                if (_ready) Call("setAutoFit", value ? "true" : "false");
+            }
+        }
+
+        private bool _shortcutLock;
+
+        private bool _recovery = true;
+        private bool _recoverySet; // PB 가 정했는지 (안 정했으면 PC 에 저장된 값을 그대로 쓴다)
+        /// <summary>복구용 자동 저장. 기본 true. 바꾼 값은 PC 에 저장되어 다음 실행에도 쓰인다</summary>
+        public bool RecoveryEnabled
+        {
+            get
+            {
+                if (!_recoverySet && _ready)
+                {
+                    var r = Parse(Call("getRecovery"));
+                    if (r != null && r.TryGetValue("recovery", out var v) && v is bool b) return b;
+                }
+                return _recovery;
+            }
+            set
+            {
+                _recovery = value;
+                _recoverySet = true;
+                if (_ready) Call("setRecovery", value ? "true" : "false");
+            }
+        }
+
+        private string _closeResult = "";
+        private string _closedDoc = "";
+        public string CloseResult => _closeResult;
+        public string ClosedDocumentBase64 => _closedDoc;
+        private bool _waitForever; // 저장 확인 창처럼 사용자가 답할 때까지 기다리는 호출
+
         public HwpxEditorControl()
         {
             Controls.Add(_web);
@@ -203,7 +263,10 @@ namespace Hwpxpb
                     var setupScript = "window.hwpBridge.setGroupSep(" + _json.Serialize(_groupSep) +
                         ").then(function(){return window.hwpBridge.setShowMenu(" + (_showMenu ? "true" : "false") +
                         ");}).then(function(){return window.hwpBridge.setPermission(" + (_allowEdit ? "true" : "false") +
-                        ");}).then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})" +
+                        ");}).then(function(){return window.hwpBridge.setAutoFit(" + (_autoFit ? "true" : "false") +
+                        ");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (_shortcutLock ? "true" : "false") +
+                        ");})" + (_recoverySet ? ".then(function(){return window.hwpBridge.setRecovery(" + (_recovery ? "true" : "false") + ");})" : "") +
+                        ".then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})" +
                         ".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
                     _web.CoreWebView2.ExecuteScriptAsync(setupScript);
                     break;
@@ -298,7 +361,59 @@ namespace Hwpxpb
 
         public bool SetEditMode(bool edit) => SetMode(edit ? "edit" : "form");
 
-        public bool CloseDocument() => Ok(Call("close"));
+        /// <summary>
+        /// 문서 닫기. askSave = false 면 묻지 않고 저장 없이 닫는다.
+        /// true 면 사용자가 고쳤을 때 에디터 화면에 "저장할까요?" (예/아니오/취소) 를 띄운다. 결과는 CloseResult,
+        /// "save" 면 ClosedDocumentBase64 / SaveClosedDocument 로 저장한다. 취소하면 false (문서는 그대로).
+        /// 사용자가 답할 때까지 TimeoutSeconds 없이 기다린다.
+        /// </summary>
+        public bool CloseDocument(bool askSave = false)
+        {
+            _closeResult = "";
+            _closedDoc = "";
+            _lastError = "";
+            _waitForever = askSave;
+            Dictionary<string, object> r;
+            try { r = Parse(Call("close", askSave ? "true" : "false")); }
+            finally { _waitForever = false; }
+            if (r == null || !(r.TryGetValue("ok", out var ok) && ok is bool okb && okb)) return false;
+            var closed = r.TryGetValue("closed", out var c) && c is bool cb && cb;
+            var save = r.TryGetValue("save", out var sv) && sv is bool sb && sb;
+            _closeResult = !closed ? "cancel" : save ? "save" : "nosave";
+            if (save) _closedDoc = Str(r, "document");
+            return closed;
+        }
+
+        /// <summary>CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장한다</summary>
+        public bool SaveClosedDocument(string path)
+        {
+            if (string.IsNullOrEmpty(_closedDoc)) return Fail("저장할 문서가 없습니다 (CloseResult 가 save 가 아닙니다)");
+            try
+            {
+                File.WriteAllBytes(path, Convert.FromBase64String(_closedDoc));
+                return true;
+            }
+            catch (Exception ex) { return Fail(ex.Message); }
+        }
+
+        /// <summary>사용자가 문서를 고쳤는지 (값 대입 SetFields 는 고침으로 치지 않는다)</summary>
+        public bool IsModified()
+        {
+            var r = Parse(Call("isModified"));
+            return r != null && r.TryGetValue("modified", out var m) && m is bool b && b;
+        }
+
+        /// <summary>좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다 (세로는 스크롤)</summary>
+        public bool FitWidth() => Ok(Call("fitWidth"));
+
+        /// <summary>에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로</summary>
+        public bool SetShortcutLockModes(bool on)
+        {
+            _shortcutLock = on;
+            return Ok(Call("setShortcutLockModes", on ? "true" : "false"));
+        }
+
+        public bool GetShortcutLockModes() => _shortcutLock;
 
         public string SelectPrinter()
         {
@@ -490,7 +605,11 @@ namespace Hwpxpb
             var until = DateTime.UtcNow.AddSeconds(TimeoutSeconds);
             while (!task.IsCompleted)
             {
-                if (DateTime.UtcNow > until) throw new TimeoutException("에디터 응답 시간 초과");
+                if (_waitForever)
+                {
+                    if (IsDisposed || _web.CoreWebView2 == null) throw new InvalidOperationException("기다리는 동안 컨트롤이 닫혔습니다");
+                }
+                else if (DateTime.UtcNow > until) throw new TimeoutException("에디터 응답 시간 초과");
                 Application.DoEvents();
                 System.Threading.Thread.Sleep(5);
             }
