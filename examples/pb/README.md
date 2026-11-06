@@ -9,7 +9,7 @@
 | DW → 문서 (값 대입) | DW 1행의 모든 컬럼 값을 문서에 한 번에 넣는다 | `SetFields(json, sep)` |
 | 문서 → DW (값 추출) | 문서의 모든 값을 DW 1행에 넣는다 (DW 에 있는 컬럼만, 형식 맞춰서) | `GetFieldsTsv(sep)`, `GetTable()` |
 | DW 만들기 | 연 양식의 개체 이름으로 DW 를 만든다 (DW 없이 시험할 때) | `GetFieldsTsv` |
-| 닫기 | 연 문서를 닫는다 (빈 화면) | `CloseDocument()` |
+| 닫기 | 연 문서를 닫는다 (빈 화면). 저장 여부를 물으려면 `CloseDocument(true)` ([가이드 9절](../../docs/pb-guide.md#9-닫을-때-저장-여부-묻기)) | `CloseDocument()` |
 | 저장 | 작성한 문서를 HWPX 로 저장 | `SaveAs` |
 | 프린터 목록 / 프린터 선택... | 설치된 프린터 목록(기본 프린터 선택됨). 버튼은 Windows 프린터 선택 창 | `GetPrinters`, `GetDefaultPrinter`, `SelectPrinter` |
 | 인쇄 | 목록에서 고른 프린터로 바로 인쇄. 목록이 비어 있으면 인쇄 대화상자(미리보기) | `PrintTo(printer, copies)`, `Print` |

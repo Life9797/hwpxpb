@@ -9,6 +9,9 @@
 //
 // 권한: 편집 권한(setPermission(true))이 있어야 자유 편집(edit)으로 바꿀 수 있다. 기본은 권한 없음.
 // 권한이 없으면 어떤 모드에서든 결과 문서는 "원본 양식 + 값" 이라 본문을 고쳐도 반영되지 않는다.
+//
+// 에디터 안쪽 기능(폭 맞춤·고침 여부·복구 설정)은 window.rhwpStudio.hwpxpb 를 쓴다
+// (scripts/patch-studio-dist.mjs 가 studio 빌드 결과에 넣는다).
 import { createStudio } from './vendor/rhwp-editor/index.js';
 import { GROUP_SEP, HwpxDocument } from './vendor/engine/index.js';
 
@@ -24,6 +27,10 @@ const state = {
   groupSep: GROUP_SEP, // 누름틀 묶음(컬럼__x) 값을 잇는 구분자 (OCX GroupSep)
   resetInProgress: false,
   closed: false, // CloseDocument 로 닫은 뒤 다시 열기 전까지
+  autoFit: false, // 문서를 열거나 화면 크기가 바뀔 때마다 본문 폭 맞춤 (setAutoFit)
+  userEdited: false, // 문서를 다시 불러오기(값 대입·인쇄 준비) 전에 사용자가 고친 적이 있는지
+  shortcutLock: false, // 에디터 단축키 막기 (setShortcutLockModes)
+  recovery: true, // 복구용 자동 저장 (setRecovery). PC 에 저장해 다음 실행에도 쓴다 (시작할 때 읽음)
 };
 
 /** 메뉴·도구 모음: 권한 없는 사용자는 항상 숨김. 권한자는 편집 모드에서, ShowMenu 면 작성 모드에서도 보인다 */
@@ -84,25 +91,56 @@ export function eventKey(e) {
 }
 
 function onEditorKey(e) {
-  if (state.mode !== 'form') return;
-  // 바깥 화면의 입력 칸(키 설정 창 등)에서 누른 키는 건드리지 않는다
+  // 바깥 화면의 입력 칸·대화상자(키 설정 창, 저장 확인 창 등)에서 누른 키는 건드리지 않는다
   if (e.target?.ownerDocument === document && e.target.closest?.('input, select, textarea, dialog')) return;
+  if (state.mode === 'form' && onFormNavKey(e)) return;
+  if (state.shortcutLock && isShortcut(e)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}
+
+/** 양식 이동 키면 처리하고 true */
+function onFormNavKey(e) {
   const pressed = eventKey(e);
-  if (!pressed) return;
+  if (!pressed) return false;
   const action = Object.keys(keys).find((k) => keys[k] && normalizeKey(keys[k]) === pressed);
-  if (!action) return;
+  if (!action) return false;
   const nav = formNav();
-  if (!nav) return;
+  if (!nav) return false;
   e.preventDefault();
   e.stopImmediatePropagation();
   if (action === 'nextObject') nav.moveObject(1);
   else if (action === 'prevObject') nav.moveObject(-1);
   else if (action === 'nextField') nav.moveField(1);
   else if (action === 'prevField') nav.moveField(-1);
+  return true;
+}
+
+/**
+ * 단축키 잠금에서 막는 키: Ctrl·Alt·Meta 조합과 F1~F24.
+ * 글자 입력, 방향키, Tab, Enter, Backspace, Delete, Esc 와 양식 이동 키(setKeys)는 그대로 둔다.
+ */
+export function isShortcut(e) {
+  if (e.isComposing || e.key === 'Process') return false; // 한글 입력 중
+  if (/^F([1-9]|1\d|2[0-4])$/.test(e.key)) return true;
+  if (!(e.ctrlKey || e.altKey || e.metaKey)) return false;
+  // AltGr(Ctrl+Alt 로 들어옴)로 치는 글자는 입력이다
+  if (e.getModifierState?.('AltGraph') && String(e.key).length === 1) return false;
+  return true;
 }
 
 /** 에디터(rhwp-studio)의 양식 이동 기능 (patches/rhwp/0002) */
 const formNav = () => studioWindow()?.rhwpStudio?.formNavigation ?? null;
+/** 에디터 안쪽 기능 (scripts/patch-studio-dist.mjs) */
+const studioHost = () => studioWindow()?.rhwpStudio?.hwpxpb ?? null;
+function requireHost() {
+  const h = studioHost();
+  if (!h) throw new Error('에디터가 이 기능을 지원하지 않습니다 (scripts/patch-studio-dist.mjs 로 만든 studio 가 필요)');
+  return h;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const truthy = (v) => v === true || v === 'true' || v === '1' || v === 1;
 
 function studioWindow() {
   try {
@@ -153,6 +191,119 @@ async function currentBytes() {
   return state.studio.exportHwpx();
 }
 
+// ---- 본문 폭 맞춤 ----------------------------------------------------------------
+// 좌우 여백을 뺀 본문 폭이 화면 폭에 꽉 차게 배율을 정하고, 본문 왼쪽 끝을 화면 왼쪽에 맞춘다. 세로는 스크롤.
+// 에디터가 문서를 연 직후에는 쪽 배치·자체 배율 조정이 비동기로 이어지므로, 배율이 자리 잡을 때까지 다시 맞춘다.
+let fitSeq = 0;
+async function fitWidthNow() {
+  const seq = ++fitSeq;
+  const host = requireHost();
+  let result = null;
+  for (let i = 0; i < 40 && seq === fitSeq; i++) {
+    result = await host.fitBodyWidth();
+    if (result) {
+      await sleep(120);
+      if (Math.abs(host.zoom() - result.zoom) < 1e-3) break; // 에디터가 배율을 다시 바꾸지 않았다
+    } else await sleep(50); // 아직 쪽이 없다
+  }
+  if (!result) throw new Error('맞출 쪽이 없습니다');
+  return result;
+}
+/** 자동 맞춤이 켜져 있으면 맞춘다 (실패해도 호출한 작업은 계속) */
+async function autoFit() {
+  if (!state.autoFit || !state.studio) return;
+  try {
+    await fitWidthNow();
+  } catch {
+    // 쪽이 없거나 에디터가 바뀌는 중
+  }
+}
+let resizeTimer = null;
+function watchResize() {
+  const root = document.querySelector('#editor');
+  if (!root || typeof ResizeObserver !== 'function') return;
+  new ResizeObserver(() => {
+    if (!state.autoFit) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(autoFit, 150);
+  }).observe(root);
+}
+
+// ---- 고침 여부 -------------------------------------------------------------------
+/** 에디터가 지금 들고 있는 문서를 사용자가 고쳤는지 */
+const studioDirty = () => Boolean(studioHost()?.isDirty?.());
+/** 문서를 다시 불러오면 에디터의 고침 표시가 지워지므로, 그 전에 기억해 둔다 */
+function rememberEdits() {
+  if (studioDirty()) state.userEdited = true;
+}
+const isModified = () => !state.closed && (state.userEdited || studioDirty());
+
+// ---- 저장 확인 창 (웹 모달) --------------------------------------------------------
+/** "변경 내용을 저장할까요?" 예 = 'yes', 아니오 = 'no', 취소·Esc = 'cancel' */
+function askSaveDialog(fileName) {
+  const dlg = document.getElementById('save-dialog');
+  if (!dlg?.showModal) return Promise.resolve(window.confirm(`${fileName} 의 변경 내용을 저장할까요?`) ? 'yes' : 'no');
+  dlg.querySelector('[data-name]').textContent = fileName;
+  dlg.returnValue = 'cancel';
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(['yes', 'no'].includes(dlg.returnValue) ? dlg.returnValue : 'cancel'), { once: true });
+    dlg.showModal();
+    dlg.querySelector('[value="yes"]')?.focus();
+  });
+}
+
+// ---- 복구용 자동 저장 ---------------------------------------------------------------
+// 에디터(rhwp-studio)는 편집 중 복구본을 IndexedDB 에 자동 저장하고, 비정상 종료 뒤 다시 시작하면 복구할지 묻는다.
+// 켜고 끄는 값은 PC 에 저장하고, 에디터를 띄우기 전에 에디터 설정에 반영한다 (시작할 때 묻는 창이 설정을 보지 않으므로
+// 끌 때는 남은 복구본도 지운다).
+const RECOVERY_STORE = 'hwpxpb-recovery';
+const STUDIO_SETTINGS = 'rhwp-settings';
+const DRAFTS_DB = 'rhwpStudioAutosave';
+function loadRecovery() {
+  try {
+    return localStorage.getItem(RECOVERY_STORE) !== '0'; // 기본: 켬
+  } catch {
+    return true;
+  }
+}
+function saveRecovery(on) {
+  try {
+    localStorage.setItem(RECOVERY_STORE, on ? '1' : '0');
+  } catch {
+    // 저장소를 못 쓰면 이번 실행에만 적용
+  }
+}
+function deleteDatabase(name) {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.deleteDatabase(name);
+      req.onsuccess = req.onerror = req.onblocked = () => resolve();
+      setTimeout(resolve, 2000);
+    } catch {
+      resolve();
+    }
+  });
+}
+/** 에디터를 띄우기 전에: 에디터 설정의 자동 저장을 켜고/끄고, 끌 때는 남은 복구본을 지운다 */
+async function applyRecoveryBeforeStart(on) {
+  try {
+    const s = JSON.parse(localStorage.getItem(STUDIO_SETTINGS) || '{}');
+    s.autosave = { ...(s.autosave ?? {}), recoveryEnabled: on, idleSaveEnabled: on };
+    localStorage.setItem(STUDIO_SETTINGS, JSON.stringify(s));
+  } catch {
+    // 설정을 못 쓰면 에디터 기본값(켬)
+  }
+  if (!on) await deleteDatabase(DRAFTS_DB);
+}
+/** 일부러 닫는 문서의 복구본은 지우고 고침 표시를 없앤다 (다음 실행에 복구를 묻지 않게) */
+async function discardDraft() {
+  try {
+    await studioWindow()?.rhwpStudio?.notifySaved?.();
+  } catch {
+    // 이전 studio
+  }
+}
+
 /** 에디터 화면에 보이는 값 (DB 컬럼 기준) */
 async function readValues(comboSep) {
   return new HwpxDocument(await currentBytes()).extract({ comboSep, groupSep: state.groupSep });
@@ -172,6 +323,7 @@ async function buildDocument(comboSep) {
 }
 
 async function load(bytes, keepMode = true) {
+  rememberEdits();
   await state.studio.loadFile(bytes, state.fileName, { suppressDialogs: true, skipUnsavedGuard: true });
   if (keepMode) await setFormMode(state.mode === 'form');
 }
@@ -181,6 +333,8 @@ async function renderPrintPages(comboSep) {
   const shown = await buildDocument(comboSep);
   const printDoc = new HwpxDocument(shown).hideGuides().toBytes();
   const editor = document.getElementById('editor');
+  // 원래 값으로 되돌린다. '' 로 지우면 index.html 의 #editor { visibility: hidden } 이 적용돼 에디터가 사라진다
+  const shownVisibility = editor.style.visibility;
   editor.style.visibility = 'hidden';
   try {
     await load(printDoc, false);
@@ -190,7 +344,8 @@ async function renderPrintPages(comboSep) {
     return pages;
   } finally {
     await load(shown);
-    editor.style.visibility = '';
+    editor.style.visibility = shownVisibility;
+    await autoFit();
   }
 }
 
@@ -204,7 +359,9 @@ const api = {
     state.mode = mode;
     new HwpxDocument(state.template); // HWPX 인지 먼저 확인
     await load(state.template);
+    state.userEdited = false;
     await applyChrome();
+    await autoFit();
     const doc = new HwpxDocument(state.template);
     emit('loaded', { fileName, table: doc.dbTable });
     return { ok: true, table: doc.dbTable };
@@ -214,6 +371,7 @@ const api = {
     state.mode = checkMode(mode);
     await setFormMode(mode === 'form');
     await applyChrome();
+    await autoFit();
     return { ok: true };
   },
 
@@ -243,16 +401,92 @@ const api = {
     return { ok: true, canEdit: state.allowEdit, mode: state.mode };
   },
 
-  /** 문서 닫기: 빈 문서로 바꾸고 열었던 양식을 잊는다. 권한·모드·키 설정은 그대로 */
-  async close() {
+  /**
+   * 문서 닫기: 빈 문서로 바꾸고 열었던 양식을 잊는다. 권한·모드·키 설정은 그대로.
+   * askSave = false(기본): 묻지 않고 저장 없이 닫는다.
+   * askSave = true: 사용자가 문서를 고쳤으면 "저장할까요?" 를 웹 모달로 묻는다.
+   *   예     → {closed:true, save:true, document:<HWPX base64>}  (파일 저장은 호출한 쪽이 한다)
+   *   아니오 → {closed:true, save:false}
+   *   취소   → {closed:false, cancelled:true}  (문서는 그대로)
+   * 고치지 않았으면 묻지 않고 {closed:true, save:false}.
+   */
+  async close(askSave = false, comboSep = ':') {
+    let save = false;
+    let hwpx;
+    if (truthy(askSave) && isModified()) {
+      const choice = await askSaveDialog(state.fileName);
+      if (choice === 'cancel') return { ok: true, closed: false, cancelled: true, save: false };
+      if (choice === 'yes') {
+        hwpx = toB64(await buildDocument(comboSep || ':'));
+        save = true;
+      }
+    }
+    await discardDraft();
     await state.studio.commands.execute('file:new-doc');
+    await discardDraft(); // 빈 문서도 고침 표시 없이
     state.template = null;
     state.fileName = 'document.hwpx';
     state.closed = true;
+    state.userEdited = false;
     await setFormMode(state.mode === 'form');
     await applyChrome();
-    emit('closed');
-    return { ok: true };
+    emit('closed', { save });
+    return save ? { ok: true, closed: true, save, document: hwpx } : { ok: true, closed: true, save };
+  },
+
+  /** 사용자가 문서를 고쳤는지 (값 대입 setFields 는 고침으로 치지 않는다) */
+  async isModified() {
+    return { ok: true, modified: isModified() };
+  },
+
+  /** 좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다. 세로는 스크롤 */
+  async fitWidth() {
+    const r = await fitWidthNow();
+    return { ok: true, zoom: r.zoom };
+  },
+
+  /** true 면 문서를 열거나 모드·화면 크기가 바뀔 때마다 본문 폭에 맞춘다. 켜면 바로 한 번 맞춘다 */
+  async setAutoFit(on) {
+    state.autoFit = truthy(on);
+    if (state.autoFit) await autoFit();
+    return { ok: true, autoFit: state.autoFit };
+  },
+
+  async getAutoFit() {
+    return { ok: true, autoFit: state.autoFit };
+  },
+
+  /**
+   * 에디터 단축키 잠금. true 면 Ctrl·Alt 조합과 F1~F24 를 모든 모드(form/edit/view)에서 막는다.
+   * 글자 입력·방향키·Tab·Enter·Backspace·Delete 와 양식 이동 키(setKeys)는 그대로 된다.
+   */
+  async setShortcutLockModes(on) {
+    state.shortcutLock = truthy(on);
+    return { ok: true, locked: state.shortcutLock };
+  },
+
+  async getShortcutLockModes() {
+    return { ok: true, locked: state.shortcutLock };
+  },
+
+  /**
+   * 복구용 자동 저장 켜기(true, 기본)/끄기(false). 값은 PC 에 저장되어 다음 실행에도 쓰인다.
+   * 끄면 남아 있는 복구본을 지워, 다음에 시작할 때 복구할지 묻지 않는다.
+   */
+  async setRecovery(on) {
+    state.recovery = truthy(on);
+    saveRecovery(state.recovery);
+    await applyRecoveryBeforeStart(state.recovery).catch(() => {}); // 다음 시작용 설정
+    const host = studioHost();
+    if (host) {
+      host.setRecovery(state.recovery); // 지금 실행 중인 에디터에도 바로
+      if (!state.recovery) await host.clearDrafts();
+    }
+    return { ok: true, recovery: state.recovery };
+  },
+
+  async getRecovery() {
+    return { ok: true, recovery: state.recovery };
   },
 
   /** 에디터에 열지 않고 파일(base64)의 테이블명만 읽는다 */
@@ -285,6 +519,9 @@ const api = {
       state.allowEdit = false;
       state.showMenu = false;
       state.groupSep = GROUP_SEP;
+      state.autoFit = false;
+      state.userEdited = false;
+      state.shortcutLock = false;
       Object.assign(keys, DEFAULT_KEYS);
       const root = document.querySelector('#editor');
       if (!root) throw new Error('#editor 요소를 찾을 수 없습니다');
@@ -333,6 +570,7 @@ const api = {
     }
     const result = doc.fill(values, { comboSep, groupSep: state.groupSep });
     await load(doc.toBytes());
+    await autoFit();
     return { ok: true, ...result };
   },
 
@@ -416,6 +654,7 @@ window.hwpBridge = new Proxy(api, {
 });
 
 async function startStudio() {
+  await applyRecoveryBeforeStart(state.recovery);
   state.studio = await createStudio('#editor', {
     studioUrl: STUDIO_URL,
     plugins: ['hwpctrl'],
@@ -426,6 +665,8 @@ async function startStudio() {
   document.querySelector('#editor').style.visibility = 'visible';
 }
 
+state.recovery = loadRecovery();
+watchResize();
 await startStudio();
 window.hwpBridgeReady = true;
 emit('ready');

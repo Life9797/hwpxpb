@@ -58,8 +58,15 @@ out.getFields = await call('getFields', ':');
 const doc = await call('getDocument', ':');
 out.documentValues = doc.ok ? new HwpxDocument(Buffer.from(doc.hwpx, 'base64')).extract().values : doc;
 out.preparePrint = await call('preparePrint');
+out.fitWidth = await call('fitWidth');
+out.autoFit = await call('setAutoFit', true);
+await call('setAutoFit', false);
+out.isModified = await call('isModified');
+out.shortcutLock = await call('setShortcutLockModes', true);
+await call('setShortcutLockModes', false);
+out.recovery = await call('getRecovery');
 out.beforeClose = (await call('getSchema')).schema.length;
-out.close = await call('close');
+out.close = await call('close', true); // 고치지 않았으므로 묻지 않고 닫힌다
 out.afterClose = await call('getSchema');
 out.reopen = await call('open', b64, 'test.hwpx', 'form');
 out.events = events.map((e) => e.event);

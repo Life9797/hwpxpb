@@ -734,9 +734,79 @@ public:
 		return Ret(result, Call(L"setMode", {Js(edit != VARIANT_FALSE ? L"edit" : L"form")}).ok);
 	}
 
-	/** 문서 닫기: 빈 화면으로 바꾼다. 권한·모드·키 설정은 그대로. 다시 Open 하기 전까지 값 읽기·저장·인쇄는 실패 */
-	STDMETHOD(CloseDocument)(VARIANT_BOOL* result) {
-		return Ret(result, Call(L"close", {}).ok);
+	/**
+	 * 문서 닫기: 빈 화면으로 바꾼다. 권한·모드·키 설정은 그대로. 다시 Open 하기 전까지 값 읽기·저장·인쇄는 실패.
+	 * askSave = false: 묻지 않고 저장 없이 닫는다.
+	 * askSave = true: 사용자가 고쳤으면 에디터 화면에 "저장할까요?" (예/아니오/취소) 를 띄운다.
+	 *   결과는 CloseResult. "save" 면 ClosedDocumentBase64 / SaveClosedDocument 로 저장한다.
+	 *   취소하면 false (문서는 그대로, LastError 는 빈 문자열). 사용자가 답할 때까지 TimeoutSeconds 없이 기다린다.
+	 */
+	STDMETHOD(CloseDocument)(VARIANT_BOOL askSave, VARIANT_BOOL* result) {
+		bool ask = askSave != VARIANT_FALSE;
+		m_closeResult.clear();
+		m_closedDoc.clear();
+		m_lastError.clear();
+		if (ask) m_waitForever = true;
+		Result r = Call(L"close", {ask ? L"true" : L"false"},
+			L"function(o){return (o.closed?(o.save?'save':'nosave'):'cancel')+'|'+(o.document||'')}");
+		m_waitForever = false;
+		if (!r.ok) return Ret(result, false);
+		size_t bar = r.payload.find(L'|');
+		m_closeResult = r.payload.substr(0, bar);
+		if (bar != std::wstring::npos) m_closedDoc = r.payload.substr(bar + 1);
+		return Ret(result, m_closeResult != L"cancel");
+	}
+
+	STDMETHOD(get_CloseResult)(BSTR* value) { return Ret(value, m_closeResult); }
+	STDMETHOD(get_ClosedDocumentBase64)(BSTR* value) { return Ret(value, m_closedDoc); }
+
+	/** CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장한다 */
+	STDMETHOD(SaveClosedDocument)(BSTR path, VARIANT_BOOL* result) {
+		if (m_closedDoc.empty()) return Ret(result, Fail(L"저장할 문서가 없습니다 (CloseResult 가 save 가 아닙니다)"));
+		std::vector<BYTE> data;
+		if (!FromBase64(m_closedDoc, data)) return Ret(result, Fail(L"문서 내용을 풀 수 없습니다"));
+		std::wstring err;
+		return Ret(result, WriteAll(Str(path), data, err) || Fail(err));
+	}
+
+	/** 사용자가 문서를 고쳤는지 (값 대입 SetFields 는 고침으로 치지 않는다) */
+	STDMETHOD(IsModified)(VARIANT_BOOL* result) {
+		Result r = Call(L"isModified", {}, L"function(o){return o.modified?'1':'0'}");
+		return Ret(result, r.ok && r.payload == L"1");
+	}
+
+	/** 좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다 (세로는 스크롤) */
+	STDMETHOD(FitWidth)(VARIANT_BOOL* result) {
+		return Ret(result, Call(L"fitWidth", {}).ok);
+	}
+
+	STDMETHOD(get_AutoFit)(VARIANT_BOOL* value) { return Ret(value, m_autoFit); }
+	STDMETHOD(put_AutoFit)(VARIANT_BOOL value) {
+		m_autoFit = value != VARIANT_FALSE;
+		if (m_ready) Call(L"setAutoFit", {m_autoFit ? L"true" : L"false"});
+		return S_OK;
+	}
+
+	/** 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로 */
+	STDMETHOD(SetShortcutLockModes)(VARIANT_BOOL on, VARIANT_BOOL* result) {
+		m_shortcutLock = on != VARIANT_FALSE;
+		return Ret(result, Call(L"setShortcutLockModes", {m_shortcutLock ? L"true" : L"false"}).ok);
+	}
+	STDMETHOD(GetShortcutLockModes)(VARIANT_BOOL* result) { return Ret(result, m_shortcutLock); }
+
+	/** 복구용 자동 저장. 기본 true. 바꾼 값은 PC 에 저장되어 다음 실행에도 쓰인다 (끄면 남은 복구본도 지움) */
+	STDMETHOD(get_RecoveryEnabled)(VARIANT_BOOL* value) {
+		if (!m_recoverySet && m_ready) {
+			Result r = Call(L"getRecovery", {}, L"function(o){return o.recovery?'1':'0'}");
+			if (r.ok) return Ret(value, r.payload == L"1");
+		}
+		return Ret(value, m_recovery);
+	}
+	STDMETHOD(put_RecoveryEnabled)(VARIANT_BOOL value) {
+		m_recovery = value != VARIANT_FALSE;
+		m_recoverySet = true;
+		if (m_ready) Call(L"setRecovery", {m_recovery ? L"true" : L"false"});
+		return S_OK;
 	}
 
 	/** 지금 모드: form | edit | view */
@@ -921,6 +991,13 @@ private:
 	bool m_allowEdit = false;
 	bool m_showMenu = false;
 	std::wstring m_groupSep = L"|";
+	bool m_autoFit = false;
+	bool m_shortcutLock = false;
+	bool m_recovery = true;
+	bool m_recoverySet = false;   // PB 가 RecoveryEnabled 를 정했는지 (안 정했으면 PC 에 저장된 값을 그대로 쓴다)
+	bool m_waitForever = false;   // 저장 확인 창처럼 사용자가 답할 때까지 기다리는 호출
+	std::wstring m_closeResult;   // 마지막 CloseDocument 결과: save / nosave / cancel
+	std::wstring m_closedDoc;     // CloseResult 가 save 일 때 닫은 문서(base64)
 	int m_callDepth = 0;
 	std::map<int, Result> m_results;
 	std::vector<PendingEvent> m_events;
@@ -1144,7 +1221,10 @@ private:
 			L"window.hwpBridge.setGroupSep(" + Js(m_groupSep) +
 			L").then(function(){return window.hwpBridge.setShowMenu(" + (m_showMenu ? L"true" : L"false") +
 			L");}).then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") +
-			L");}).then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})"
+			L");}).then(function(){return window.hwpBridge.setAutoFit(" + (m_autoFit ? L"true" : L"false") +
+			L");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (m_shortcutLock ? L"true" : L"false") +
+			L");})" + (m_recoverySet ? std::wstring(L".then(function(){return window.hwpBridge.setRecovery(") + (m_recovery ? L"true" : L"false") + L");})" : std::wstring()) +
+			L".then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})"
 			L".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
 		m_web->ExecuteScript(script.c_str(), nullptr);
 	}
@@ -1535,7 +1615,9 @@ private:
 	bool Wait(F done) {
 		ULONGLONG until = GetTickCount64() + static_cast<ULONGLONG>(m_timeout > 0 ? m_timeout : 60) * 1000;
 		while (!done()) {
-			if (GetTickCount64() > until) return false;
+			if (m_waitForever) {
+				if (!m_web || !IsWindow()) return false;  // 기다리는 동안 컨트롤이 닫혔다
+			} else if (GetTickCount64() > until) return false;
 			MSG msg;
 			while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
 				if (msg.message == WM_QUIT) {
