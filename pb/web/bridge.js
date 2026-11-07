@@ -31,6 +31,7 @@ const state = {
   userEdited: false, // 문서를 다시 불러오기(값 대입·인쇄 준비) 전에 사용자가 고친 적이 있는지
   shortcutLock: false, // 에디터 단축키 막기 (setShortcutLockModes)
   recovery: true, // 복구용 자동 저장 (setRecovery). PC 에 저장해 다음 실행에도 쓴다 (시작할 때 읽음)
+  saveDialogOpen: false, // 닫기 저장 확인 창이 떠 있는 동안 (그동안 다른 호출은 거절)
 };
 
 /** 메뉴·도구 모음: 권한 없는 사용자는 항상 숨김. 권한자는 편집 모드에서, ShowMenu 면 작성 모드에서도 보인다 */
@@ -245,8 +246,16 @@ function askSaveDialog(fileName) {
   if (!dlg?.showModal) return Promise.resolve(window.confirm(`${fileName} 의 변경 내용을 저장할까요?`) ? 'yes' : 'no');
   dlg.querySelector('[data-name]').textContent = fileName;
   dlg.returnValue = 'cancel';
+  state.saveDialogOpen = true;
   return new Promise((resolve) => {
-    dlg.addEventListener('close', () => resolve(['yes', 'no'].includes(dlg.returnValue) ? dlg.returnValue : 'cancel'), { once: true });
+    dlg.addEventListener(
+      'close',
+      () => {
+        state.saveDialogOpen = false;
+        resolve(['yes', 'no'].includes(dlg.returnValue) ? dlg.returnValue : 'cancel');
+      },
+      { once: true },
+    );
     dlg.showModal();
     dlg.querySelector('[value="yes"]')?.focus();
   });
@@ -259,6 +268,18 @@ function askSaveDialog(fileName) {
 const RECOVERY_STORE = 'hwpxpb-recovery';
 const STUDIO_SETTINGS = 'rhwp-settings';
 const DRAFTS_DB = 'rhwpStudioAutosave';
+/**
+ * 시작할 때의 복구 설정. OCX 가 주소에 ?recovery=0|1 을 붙였으면(PB 가 RecoveryEnabled 를 화면을 열기 전에 정함)
+ * 그 값을 쓰고 저장한다. 에디터가 시작하자마자 복구를 묻기 때문에, 열린 뒤에 정하면 이번 실행에는 늦다.
+ */
+function startupRecovery() {
+  const q = new URLSearchParams(location.search).get('recovery');
+  if (q === '0' || q === '1') {
+    saveRecovery(q === '1');
+    return q === '1';
+  }
+  return loadRecovery();
+}
 function loadRecovery() {
   try {
     return localStorage.getItem(RECOVERY_STORE) !== '0'; // 기본: 켬
@@ -503,6 +524,10 @@ const api = {
     if (state.resetInProgress) throw new Error('에디터 초기화가 이미 진행 중입니다');
     state.resetInProgress = true;
     try {
+      // 창을 닫는 중이므로 떠 있는 저장 확인 창은 취소로 닫는다
+      if (state.saveDialogOpen) document.getElementById('save-dialog')?.close('cancel');
+      // 창을 닫아 일부러 버리는 문서다. 복구본을 남기면 다음 창(같은 화면 재사용)이 복구를 묻는다
+      await discardDraft();
       try {
         state.studio?.destroy();
       } catch {
@@ -638,12 +663,19 @@ const api = {
   },
 };
 
+// 저장 확인 창이 떠 있는 동안에도 부를 수 있는 함수 (상태만 읽음)
+const READ_ONLY = new Set(['getPermission', 'getKeys', 'isModified', 'getAutoFit', 'getShortcutLockModes', 'getRecovery']);
+
 // OCX 는 문자열만 주고받으므로 결과를 JSON 문자열로 감싼다
 window.hwpBridge = new Proxy(api, {
   get(target, name) {
     const fn = target[name];
     if (typeof fn !== 'function') return undefined;
     return async (...args) => {
+      // OCX 는 답을 기다리는 동안 PB 메시지를 돌리므로, 창이 떠 있을 때 PB 단추로 다른 호출이 들어올 수 있다
+      if (state.saveDialogOpen && !READ_ONLY.has(name) && name !== 'reset') {
+        return JSON.stringify({ ok: false, busy: true, error: '저장 확인 창이 열려 있습니다 (사용자 응답을 기다리는 중)' });
+      }
       try {
         return JSON.stringify(await fn(...args));
       } catch (e) {
@@ -665,7 +697,7 @@ async function startStudio() {
   document.querySelector('#editor').style.visibility = 'visible';
 }
 
-state.recovery = loadRecovery();
+state.recovery = startupRecovery();
 watchResize();
 await startStudio();
 window.hwpBridgeReady = true;

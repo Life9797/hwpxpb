@@ -239,6 +239,7 @@ End If
 - 사용자가 고치지 않았으면 묻지 않고 닫습니다 (`CloseResult` = `"nosave"`). 값 대입(`SetFields` 등)은 고침으로 치지 않습니다. 미리 확인하려면 `IsModified()`.
 - 창은 PB 가 아니라 에디터 화면 안에 뜹니다. Enter = 예, Esc = 취소.
 - 사용자가 답할 때까지 기다리므로 이 호출에는 `TimeoutSeconds` 가 적용되지 않습니다.
+- 창이 떠 있는 동안 PB 단추 등으로 부른 다른 메서드는 실행하지 않고 실패합니다 (`LastError` "저장 확인 창이 열려 있습니다"). 상태만 읽는 `IsModified`·`GetShortcutLockModes` 등은 됩니다. PB 창을 닫으면 확인 창은 취소로 닫힙니다.
 - "예" 의 문서는 `SaveAs` 와 같습니다 (작성 모드면 원본 양식 + 입력값). 드롭다운 코드 구분자는 `:` 입니다.
 
 ## 10. 본문 폭에 맞추기
@@ -268,5 +269,6 @@ lb_locked = ole_hwp.object.GetShortcutLockModes()
 ole_hwp.object.RecoveryEnabled = False   // 끄기: 복구본을 만들지 않고, 남은 복구본도 지움 → 시작할 때 묻지 않음
 ole_hwp.object.RecoveryEnabled = True    // 켜기 (기본)
 ```
-- 값은 PC(WebView2 사용자 데이터)에 저장되어 다음 실행에도 쓰입니다. 시작할 때 묻는 창은 PB 가 속성을 정하기 전에 뜰 수 있으므로, 끈 값은 **다음 실행부터** 확실히 적용됩니다.
-- `CloseDocument` 로 정상적으로 닫은 문서의 복구본은 지웁니다 (다음에 묻지 않음).
+- 에디터는 시작하자마자 복구를 묻습니다. **컨트롤을 만든 직후(창 open 이벤트 등, `ready` 전)에 정하면** OCX 가 화면을 열 때 값을 넘겨 그 실행부터 묻지 않습니다. `ready` 뒤에 정하면 이번 실행에는 이미 물었을 수 있고, 다음 실행부터 적용됩니다.
+- 값은 PC(WebView2 사용자 데이터 `%LOCALAPPDATA%\hwpxpb\WebView2`)에 저장되어 다음 실행에도 쓰입니다. 이 OCX 를 쓰는 그 PC 의 모든 PB 프로그램이 같은 값을 씁니다.
+- `CloseDocument` 로 닫거나 PB 창을 닫은 문서의 복구본은 지웁니다 (다음에 묻지 않음). 복구를 묻는 것은 프로그램이 비정상 종료됐을 때뿐입니다.

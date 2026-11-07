@@ -21,3 +21,16 @@ jobs:
       - name: Python 서버 시험
         working-directory: server
         run: python -m unittest discover -s tests -t . -v
+  # 에디터 화면(pb/dist)의 기능을 헤드리스 Chromium 으로 시험한다
+  # (본문 폭 맞춤, 닫을 때 저장 확인, 단축키 잠금, 복구용 자동 저장)
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e

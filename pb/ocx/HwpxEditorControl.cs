@@ -206,6 +206,8 @@ namespace Hwpxpb
         public string CloseResult => _closeResult;
         public string ClosedDocumentBase64 => _closedDoc;
         private bool _waitForever; // 저장 확인 창처럼 사용자가 답할 때까지 기다리는 호출
+        private int _callDepth;    // 진행 중인 Call 수 (기다리는 동안 PB 가 다시 부르면 2 이상)
+        private const string Busy = "저장 확인 창이 열려 있습니다 (사용자 응답을 기다리는 중)";
 
         public HwpxEditorControl()
         {
@@ -231,7 +233,10 @@ namespace Hwpxpb
                 _web.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
                 _web.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 _web.CoreWebView2.WebMessageReceived += OnWebMessage;
-                _web.CoreWebView2.Navigate("https://" + Host + "/index.html");
+                // RecoveryEnabled 를 화면을 열기 전에 정했으면 주소로 넘긴다. 에디터는 시작하자마자 복구를 묻기 때문
+                var url = "https://" + Host + "/index.html";
+                if (_recoverySet) url += _recovery ? "?recovery=1" : "?recovery=0";
+                _web.CoreWebView2.Navigate(url);
             }
             catch (Exception ex)
             {
@@ -369,6 +374,8 @@ namespace Hwpxpb
         /// </summary>
         public bool CloseDocument(bool askSave = false)
         {
+            // 저장 확인 창이 이미 떠 있다 (그 창을 기다리는 동안 PB 단추로 다시 부름). 바깥 호출의 상태는 건드리지 않는다
+            if (_waitForever) return Fail(Busy);
             _closeResult = "";
             _closedDoc = "";
             _lastError = "";
@@ -575,6 +582,19 @@ namespace Hwpxpb
                 Fail("에디터가 아직 준비되지 않았습니다 (Ready 이벤트 후 호출하세요)");
                 return "{\"ok\":false,\"error\":\"not ready\"}";
             }
+            // 저장 확인 창(CloseDocument(true))이 사용자 답을 기다리는 동안 PB 가 부른 다른 호출은 받지 않는다
+            if (_waitForever && _callDepth > 0)
+            {
+                Fail(Busy);
+                return _json.Serialize(new { ok = false, busy = true, error = Busy });
+            }
+            _callDepth++;
+            try { return CallCore(method, args); }
+            finally { _callDepth--; }
+        }
+
+        private string CallCore(string method, string[] args)
+        {
             var id = ++_nextCallId;
             var tcs = new TaskCompletionSource<string>();
             _pending[id] = tcs;
