@@ -43,6 +43,7 @@ using Microsoft::WRL::Callback;
 namespace {
 
 const wchar_t* const kHost = L"hwpxpb.local";
+const wchar_t* const kBusy = L"저장 확인 창이 열려 있습니다 (사용자 응답을 기다리는 중)";
 const UINT WM_HWPX_EVENTS = WM_APP + 0x48;
 
 std::wstring Str(BSTR b) { return b ? std::wstring(b, SysStringLen(b)) : std::wstring(); }
@@ -742,6 +743,8 @@ public:
 	 *   취소하면 false (문서는 그대로, LastError 는 빈 문자열). 사용자가 답할 때까지 TimeoutSeconds 없이 기다린다.
 	 */
 	STDMETHOD(CloseDocument)(VARIANT_BOOL askSave, VARIANT_BOOL* result) {
+		// 저장 확인 창이 이미 떠 있다 (그 창을 기다리는 동안 PB 단추로 다시 부름). 바깥 호출의 상태는 건드리지 않는다
+		if (m_waitForever) return Ret(result, Fail(kBusy));
 		bool ask = askSave != VARIANT_FALSE;
 		m_closeResult.clear();
 		m_closedDoc.clear();
@@ -1441,7 +1444,10 @@ private:
 				}).Get(),
 			&token);
 		m_status = L"에디터 화면 여는 중: " + folder;
-		m_web->Navigate((std::wstring(L"https://") + kHost + L"/index.html").c_str());
+		// RecoveryEnabled 를 화면을 열기 전에 정했으면 주소로 넘긴다. 에디터는 시작하자마자 복구를 묻기 때문
+		std::wstring url = std::wstring(L"https://") + kHost + L"/index.html";
+		if (m_recoverySet) url += m_recovery ? L"?recovery=1" : L"?recovery=0";
+		m_web->Navigate(url.c_str());
 	}
 
 	void OnNavigationCompleted(bool ok, COREWEBVIEW2_WEB_ERROR_STATUS st) {
@@ -1570,6 +1576,12 @@ private:
 	 */
 	Result Call(const wchar_t* method, std::initializer_list<std::wstring> args, const std::wstring& post = L"") {
 		Result r;
+		// 저장 확인 창(CloseDocument(true))이 사용자 답을 기다리는 동안 PB 가 부른 다른 호출은 받지 않는다
+		if (m_waitForever && m_callDepth > 0) {
+			r.error = kBusy;
+			Fail(r.error);
+			return r;
+		}
 		if (!m_ready || !m_web) {
 			r.error = L"에디터가 아직 준비되지 않았습니다 (Ready 이벤트 후 호출하세요)";
 			Fail(r.error);
