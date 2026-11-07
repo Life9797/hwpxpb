@@ -30,6 +30,8 @@ const state = {
   autoFit: false, // 문서를 열거나 화면 크기가 바뀔 때마다 본문 폭 맞춤 (setAutoFit)
   userEdited: false, // 문서를 다시 불러오기(값 대입·인쇄 준비) 전에 사용자가 고친 적이 있는지
   shortcutLock: false, // 에디터 단축키 막기 (setShortcutLockModes)
+  shortcutAllow: new Set(), // 잠금 중에도 허용할 키 ("ctrl+c" 꼴)
+  lastFit: null, // 마지막으로 맞춘 본문 {bodyLeft, bodyWidth} (구역이 바뀌어 여백이 달라지면 다시 맞춤)
   recovery: true, // 복구용 자동 저장 (setRecovery). PC 에 저장해 다음 실행에도 쓴다 (시작할 때 읽음)
   saveDialogOpen: false, // 닫기 저장 확인 창이 떠 있는 동안 (그동안 다른 호출은 거절)
 };
@@ -95,7 +97,7 @@ function onEditorKey(e) {
   // 바깥 화면의 입력 칸·대화상자(키 설정 창, 저장 확인 창 등)에서 누른 키는 건드리지 않는다
   if (e.target?.ownerDocument === document && e.target.closest?.('input, select, textarea, dialog')) return;
   if (state.mode === 'form' && onFormNavKey(e)) return;
-  if (state.shortcutLock && isShortcut(e)) {
+  if (state.shortcutLock && isShortcut(e) && !state.shortcutAllow.has(eventKey(e))) {
     e.preventDefault();
     e.stopImmediatePropagation();
   }
@@ -199,10 +201,12 @@ let fitSeq = 0;
 async function fitWidthNow() {
   const seq = ++fitSeq;
   const host = requireHost();
+  watchSections(); // 에디터가 늦게 화면을 만든 경우를 위해 여기서도
   let result = null;
   for (let i = 0; i < 40 && seq === fitSeq; i++) {
     result = await host.fitBodyWidth();
     if (result) {
+      state.lastFit = { bodyLeft: result.bodyLeft, bodyWidth: result.bodyWidth };
       await sleep(120);
       if (Math.abs(host.zoom() - result.zoom) < 1e-3) break; // 에디터가 배율을 다시 바꾸지 않았다
     } else await sleep(50); // 아직 쪽이 없다
@@ -218,6 +222,29 @@ async function autoFit() {
   } catch {
     // 쪽이 없거나 에디터가 바뀌는 중
   }
+}
+/**
+ * 쪽을 넘기다 여백이 다른 구역에 오면 다시 맞춘다 (AutoFit). 에디터를 새로 만들 때마다(reset) 다시 붙인다.
+ */
+let scrollTimer = null;
+function watchSections() {
+  const sc = studioWindow()?.document?.getElementById('scroll-container');
+  if (!sc || sc.__hwpxpbFit) return;
+  sc.__hwpxpbFit = true;
+  sc.addEventListener(
+    'scroll',
+    () => {
+      if (!state.autoFit) return;
+      clearTimeout(scrollTimer);
+      scrollTimer = setTimeout(() => {
+        const now = studioHost()?.bodyAt?.();
+        const last = state.lastFit;
+        if (!now || !last) return;
+        if (Math.abs(now.bodyWidth - last.bodyWidth) > 0.5 || Math.abs(now.bodyLeft - last.bodyLeft) > 0.5) autoFit();
+      }, 200);
+    },
+    { passive: true },
+  );
 }
 let resizeTimer = null;
 function watchResize() {
@@ -480,14 +507,25 @@ const api = {
   /**
    * 에디터 단축키 잠금. true 면 Ctrl·Alt 조합과 F1~F24 를 모든 모드(form/edit/view)에서 막는다.
    * 글자 입력·방향키·Tab·Enter·Backspace·Delete 와 양식 이동 키(setKeys)는 그대로 된다.
+   * allow: 잠금 중에도 허용할 키를 쉼표로. 예: "Ctrl+C,Ctrl+V,Ctrl+Z". 빼면(또는 null) 지금 목록 그대로, "" 이면 비움
    */
-  async setShortcutLockModes(on) {
+  async setShortcutLockModes(on, allow) {
+    if (allow != null) {
+      const list = String(allow)
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean);
+      // 수식 키만 있는 이름(예: "Ctrl+")은 키가 아니다
+      const bad = list.find((k) => ['', ...MOD_ORDER].includes(normalizeKey(k).split('+').pop()));
+      if (bad) throw new Error(`키 이름이 잘못됐습니다: ${bad}`);
+      state.shortcutAllow = new Set(list.map(normalizeKey));
+    }
     state.shortcutLock = truthy(on);
-    return { ok: true, locked: state.shortcutLock };
+    return { ok: true, locked: state.shortcutLock, allow: [...state.shortcutAllow] };
   },
 
   async getShortcutLockModes() {
-    return { ok: true, locked: state.shortcutLock };
+    return { ok: true, locked: state.shortcutLock, allow: [...state.shortcutAllow] };
   },
 
   /**
@@ -547,6 +585,8 @@ const api = {
       state.autoFit = false;
       state.userEdited = false;
       state.shortcutLock = false;
+      state.shortcutAllow = new Set();
+      state.lastFit = null;
       Object.assign(keys, DEFAULT_KEYS);
       const root = document.querySelector('#editor');
       if (!root) throw new Error('#editor 요소를 찾을 수 없습니다');
@@ -693,6 +733,7 @@ async function startStudio() {
     chrome: { menu: false, toolbar: false, statusbar: false },
   });
   hookEditorKeys();
+  watchSections();
   // 에디터 원래 화면(메뉴·도구 모음)이 잠깐 보였다 사라지지 않게, 숨긴 상태로 만든 뒤 보인다
   document.querySelector('#editor').style.visibility = 'visible';
 }

@@ -72,7 +72,8 @@ namespace Hwpxpb
         // CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장
         [DispId(47)] bool SaveClosedDocument(string path);
         // 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 모든 모드에 적용
-        [DispId(48)] bool SetShortcutLockModes(bool on);
+        // allow = 잠금 중에도 허용할 키 (예: "Ctrl+C,Ctrl+V"). 빼면 "" (허용 키 없음)
+        [DispId(48)] bool SetShortcutLockModes(bool on, [Optional, DefaultParameterValue("")] string allow);
         [DispId(49)] bool GetShortcutLockModes();
         // 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
         [DispId(50)] bool RecoveryEnabled { get; set; }
@@ -98,11 +99,14 @@ namespace Hwpxpb
         [DispId(1)] void Ready();
         [DispId(2)] void Loaded(string fileName, string table);
         [DispId(3)] void ErrorOccurred(string message);
+        // CloseDocument 로 문서를 닫은 뒤. result = "save" / "nosave" (취소하면 오지 않음)
+        [DispId(4)] void Closed(string result);
     }
 
     public delegate void ReadyHandler();
     public delegate void LoadedHandler(string fileName, string table);
     public delegate void ErrorHandler(string message);
+    public delegate void ClosedHandler(string result);
 
     [ComVisible(true)]
     [Guid("6B2E7C1A-3F4D-4E8B-9A51-2C7D0E9F1A03")]
@@ -115,6 +119,7 @@ namespace Hwpxpb
         public event ReadyHandler Ready;
         public event LoadedHandler Loaded;
         public event ErrorHandler ErrorOccurred;
+        public event ClosedHandler Closed;
 
         private const string Host = "hwpxpb.local";
         private readonly WebView2 _web = new WebView2 { Dock = DockStyle.Fill };
@@ -178,6 +183,7 @@ namespace Hwpxpb
         }
 
         private bool _shortcutLock;
+        private string _shortcutAllow = ""; // 잠금 중에도 허용할 키
 
         private bool _recovery = true;
         private bool _recoverySet; // PB 가 정했는지 (안 정했으면 PC 에 저장된 값을 그대로 쓴다)
@@ -269,7 +275,7 @@ namespace Hwpxpb
                         ").then(function(){return window.hwpBridge.setShowMenu(" + (_showMenu ? "true" : "false") +
                         ");}).then(function(){return window.hwpBridge.setPermission(" + (_allowEdit ? "true" : "false") +
                         ");}).then(function(){return window.hwpBridge.setAutoFit(" + (_autoFit ? "true" : "false") +
-                        ");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (_shortcutLock ? "true" : "false") +
+                        ");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (_shortcutLock ? "true" : "false") + "," + _json.Serialize(_shortcutAllow) +
                         ");})" + (_recoverySet ? ".then(function(){return window.hwpBridge.setRecovery(" + (_recovery ? "true" : "false") + ");})" : "") +
                         ".then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})" +
                         ".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
@@ -301,8 +307,13 @@ namespace Hwpxpb
             catch (Exception ex) { return Fail(ex.Message); }
         }
 
-        public bool OpenBase64(string base64, string fileName, string mode) =>
-            Ok(Call("open", base64, fileName ?? "document.hwpx", Mode(mode)));
+        public bool OpenBase64(string base64, string fileName, string mode)
+        {
+            // 이전에 닫은 문서(ClosedDocumentBase64)는 새 문서를 열면 버린다 (큰 문서를 계속 들고 있지 않게)
+            _closedDoc = "";
+            _closeResult = "";
+            return Ok(Call("open", base64, fileName ?? "document.hwpx", Mode(mode)));
+        }
 
         public bool SetMode(string mode) => Ok(Call("setMode", Mode(mode)));
 
@@ -388,6 +399,12 @@ namespace Hwpxpb
             var save = r.TryGetValue("save", out var sv) && sv is bool sb && sb;
             _closeResult = !closed ? "cancel" : save ? "save" : "nosave";
             if (save) _closedDoc = Str(r, "document");
+            if (closed)
+            {
+                // PB 의 이벤트는 이 호출이 끝난 뒤에 (재진입 방지)
+                var result = _closeResult;
+                BeginInvoke(new Action(() => Closed?.Invoke(result)));
+            }
             return closed;
         }
 
@@ -413,11 +430,17 @@ namespace Hwpxpb
         /// <summary>좌우 여백을 뺀 본문 폭을 화면 폭에 맞춘다 (세로는 스크롤)</summary>
         public bool FitWidth() => Ok(Call("fitWidth"));
 
-        /// <summary>에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로</summary>
-        public bool SetShortcutLockModes(bool on)
+        /// <summary>
+        /// 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로.
+        /// allow: 잠금 중에도 허용할 키를 쉼표로 (예: "Ctrl+C,Ctrl+V,Ctrl+Z"). "" 이면 허용 키 없음
+        /// </summary>
+        public bool SetShortcutLockModes(bool on, string allow = "")
         {
+            var keys = allow ?? "";
+            if (!Ok(Call("setShortcutLockModes", on ? "true" : "false", keys))) return false;
             _shortcutLock = on;
-            return Ok(Call("setShortcutLockModes", on ? "true" : "false"));
+            _shortcutAllow = keys;
+            return true;
         }
 
         public bool GetShortcutLockModes() => _shortcutLock;

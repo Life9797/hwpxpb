@@ -589,6 +589,9 @@ public:
 	}
 
 	STDMETHOD(OpenBase64)(BSTR base64, BSTR fileName, BSTR mode, VARIANT_BOOL* result) {
+		// 이전에 닫은 문서(ClosedDocumentBase64)는 새 문서를 열면 버린다 (큰 문서를 계속 들고 있지 않게)
+		m_closedDoc.clear();
+		m_closeResult.clear();
 		std::wstring name = Str(fileName);
 		if (name.empty()) name = L"document.hwpx";
 		return Ret(result, Call(L"open", {Js(Str(base64)), Js(name), Js(Mode(mode))}).ok);
@@ -757,6 +760,7 @@ public:
 		size_t bar = r.payload.find(L'|');
 		m_closeResult = r.payload.substr(0, bar);
 		if (bar != std::wstring::npos) m_closedDoc = r.payload.substr(bar + 1);
+		if (m_closeResult != L"cancel") QueueEvent(4, m_closeResult);
 		return Ret(result, m_closeResult != L"cancel");
 	}
 
@@ -790,10 +794,17 @@ public:
 		return S_OK;
 	}
 
-	/** 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로 */
-	STDMETHOD(SetShortcutLockModes)(VARIANT_BOOL on, VARIANT_BOOL* result) {
-		m_shortcutLock = on != VARIANT_FALSE;
-		return Ret(result, Call(L"setShortcutLockModes", {m_shortcutLock ? L"true" : L"false"}).ok);
+	/**
+	 * 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 글자 입력·방향키·Tab·Enter 와 양식 이동 키는 그대로.
+	 * allow: 잠금 중에도 허용할 키를 쉼표로 (예: "Ctrl+C,Ctrl+V,Ctrl+Z"). "" 이면 허용 키 없음
+	 */
+	STDMETHOD(SetShortcutLockModes)(VARIANT_BOOL on, BSTR allow, VARIANT_BOOL* result) {
+		bool lock = on != VARIANT_FALSE;
+		std::wstring keys = Str(allow);
+		if (!Call(L"setShortcutLockModes", {lock ? L"true" : L"false", Js(keys)}).ok) return Ret(result, false);
+		m_shortcutLock = lock;
+		m_shortcutAllow = keys;
+		return Ret(result, true);
 	}
 	STDMETHOD(GetShortcutLockModes)(VARIANT_BOOL* result) { return Ret(result, m_shortcutLock); }
 
@@ -996,6 +1007,7 @@ private:
 	std::wstring m_groupSep = L"|";
 	bool m_autoFit = false;
 	bool m_shortcutLock = false;
+	std::wstring m_shortcutAllow;   // 잠금 중에도 허용할 키
 	bool m_recovery = true;
 	bool m_recoverySet = false;   // PB 가 RecoveryEnabled 를 정했는지 (안 정했으면 PC 에 저장된 값을 그대로 쓴다)
 	bool m_waitForever = false;   // 저장 확인 창처럼 사용자가 답할 때까지 기다리는 호출
@@ -1043,6 +1055,9 @@ private:
 		for (auto& e : events) {
 			if (e.id == 1) {
 				FireDispEvent(1, nullptr, 0);
+			} else if (e.id == 4) {
+				CComVariant arg(e.a.c_str());
+				FireDispEvent(4, &arg, 1);
 			} else if (e.id == 2) {
 				CComVariant args[2] = {CComVariant(e.b.c_str()), CComVariant(e.a.c_str())};  // table, fileName (역순)
 				FireDispEvent(2, args, 2);
@@ -1225,7 +1240,7 @@ private:
 			L").then(function(){return window.hwpBridge.setShowMenu(" + (m_showMenu ? L"true" : L"false") +
 			L");}).then(function(){return window.hwpBridge.setPermission(" + (m_allowEdit ? L"true" : L"false") +
 			L");}).then(function(){return window.hwpBridge.setAutoFit(" + (m_autoFit ? L"true" : L"false") +
-			L");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (m_shortcutLock ? L"true" : L"false") +
+			L");}).then(function(){return window.hwpBridge.setShortcutLockModes(" + (m_shortcutLock ? L"true" : L"false") + L"," + Js(m_shortcutAllow) +
 			L");})" + (m_recoverySet ? std::wstring(L".then(function(){return window.hwpBridge.setRecovery(") + (m_recovery ? L"true" : L"false") + L");})" : std::wstring()) +
 			L".then(function(){window.chrome.webview.postMessage(JSON.stringify({event:'permissionsReady'}));})"
 			L".catch(function(e){window.chrome.webview.postMessage(JSON.stringify({event:'permissionError',message:String(e&&e.message||e)}));});";
