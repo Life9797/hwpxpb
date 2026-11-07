@@ -65,11 +65,11 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `CloseDocument(askSave)` | 문서 닫기. 빈 화면이 되고, 다시 `Open` 하기 전까지 값 읽기·저장·인쇄는 false/`""` (`LastError` "열린 문서가 없습니다"). 편집 권한·모드·키 설정은 그대로. `askSave` 를 빼거나 `false` 면 묻지 않고 저장 없이 닫고, `true` 면 고친 문서일 때 저장할지 묻습니다 (아래 9절) |
 | `IsModified()` | 사용자가 문서를 고쳤는지. 값 대입(`SetFields` 등)은 고침으로 치지 않음 |
 | `CloseResult` (속성) | 마지막 `CloseDocument` 결과: `"save"`(예) / `"nosave"`(아니오·묻지 않음·고치지 않음) / `"cancel"`(취소) |
-| `ClosedDocumentBase64` (속성) | `CloseResult` 가 `"save"` 일 때 닫은 문서(HWPX) base64. DB BLOB 저장용 |
+| `ClosedDocumentBase64` (속성) | `CloseResult` 가 `"save"` 일 때 닫은 문서(HWPX) base64. DB BLOB 저장용. 다음 `Open` 때 비워짐 |
 | `SaveClosedDocument(path)` | `CloseResult` 가 `"save"` 일 때 닫은 문서를 파일로 저장 |
 | `FitWidth()` | 좌우 여백을 뺀 본문 폭을 화면 폭에 꽉 차게 맞춤. 세로는 스크롤 (아래 10절) |
-| `AutoFit` (속성) | `true` 면 문서를 열거나 값 대입·모드·창 크기가 바뀔 때마다 `FitWidth`. 기본 `false` |
-| `SetShortcutLockModes(on)` | 에디터 단축키 잠금 켜기/끄기. 모든 모드(작성·편집·보기)에 적용 (아래 11절) |
+| `AutoFit` (속성) | `true` 면 문서를 열거나 값 대입·모드·창 크기가 바뀔 때, 쪽을 넘겨 여백이 다른 구역에 왔을 때마다 `FitWidth`. 기본 `false` |
+| `SetShortcutLockModes(on, allow)` | 에디터 단축키 잠금 켜기/끄기. 모든 모드(작성·편집·보기)에 적용. `allow` = 잠금 중에도 허용할 키 (예: `"Ctrl+C,Ctrl+V"`, 빼면 없음) (아래 11절) |
 | `GetShortcutLockModes()` | 단축키 잠금 상태 |
 | `RecoveryEnabled` (속성) | 복구용 자동 저장. 기본 `true`. 값은 PC 에 저장되어 다음 실행에도 쓰임 (아래 12절) |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
@@ -241,11 +241,13 @@ End If
 - 사용자가 답할 때까지 기다리므로 이 호출에는 `TimeoutSeconds` 가 적용되지 않습니다.
 - 창이 떠 있는 동안 PB 단추 등으로 부른 다른 메서드는 실행하지 않고 실패합니다 (`LastError` "저장 확인 창이 열려 있습니다"). 상태만 읽는 `IsModified`·`GetShortcutLockModes` 등은 됩니다. PB 창을 닫으면 확인 창은 취소로 닫힙니다.
 - "예" 의 문서는 `SaveAs` 와 같습니다 (작성 모드면 원본 양식 + 입력값). 드롭다운 코드 구분자는 `:` 입니다.
+- 닫힌 뒤 `closed` 이벤트가 옵니다 (인자 `result` = `"save"` / `"nosave"`, 취소하면 오지 않음). 이벤트 목록에 안 보이면 컨트롤을 지웠다 다시 넣습니다.
+- `ClosedDocumentBase64` 는 다음 `Open`/`OpenBase64` 때 비워집니다.
 
 ## 10. 본문 폭에 맞추기
 
 `FitWidth()` 는 좌우 여백을 뺀 본문 폭이 화면 폭에 꽉 차도록 배율을 정하고, 본문 왼쪽 끝을 화면 왼쪽에 맞춥니다. 세로는 스크롤합니다.
-여백은 화면 가운데에 보이는 쪽의 것을 씁니다.
+여백은 화면 가운데에 보이는 쪽의 것을 씁니다. `AutoFit` 이면 쪽을 넘기다 여백(또는 용지)이 다른 구역에 왔을 때 다시 맞춥니다.
 ```powerscript
 ole_hwp.object.FitWidth()          // 지금 한 번
 ole_hwp.object.AutoFit = True      // 열기·값 대입·모드 변경·창 크기 변경 때마다 자동으로
@@ -257,9 +259,13 @@ ole_hwp.object.AutoFit = True      // 열기·값 대입·모드 변경·창 크
 ole_hwp.object.SetShortcutLockModes(True)    // 잠금
 ole_hwp.object.SetShortcutLockModes(False)   // 풀기 (기본)
 lb_locked = ole_hwp.object.GetShortcutLockModes()
+// 잠그되 복사·붙여넣기·되돌리기는 허용
+ole_hwp.object.SetShortcutLockModes(True, "Ctrl+C,Ctrl+V,Ctrl+Z")
 ```
 - 막는 키: Ctrl·Alt 조합 (Ctrl+S/O/N/P/Z/C/V, Ctrl+G 등)과 F1~F24. 작성·편집·보기 모든 모드에 적용됩니다.
-- 그대로 되는 키: 글자 입력(한글 포함), 방향키, Tab, Enter, Backspace, Delete, Esc, 그리고 `SetKeys` 로 정한 양식 이동 키.
+- 그대로 되는 키: 글자 입력(한글 포함), 방향키, Tab, Enter, Backspace, Delete, Esc, `SetKeys` 로 정한 양식 이동 키, 그리고 `allow` 에 적은 키.
+- `allow` 는 부를 때마다 새로 정합니다 (빼면 허용 키 없음). 키 이름은 `SetKeys` 와 같습니다.
+- 마우스 오른쪽 메뉴, `ShowMenu` 로 보이는 메뉴·도구 모음은 막지 않습니다.
 
 ## 12. 복구용 자동 저장
 

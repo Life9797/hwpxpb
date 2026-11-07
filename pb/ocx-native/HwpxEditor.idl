@@ -69,8 +69,8 @@ interface IHwpxEditor : IDispatch
 	[id(46), propget] HRESULT ClosedDocumentBase64([out, retval] BSTR* value);
 	// CloseResult 가 "save" 일 때 닫은 문서를 파일로 저장
 	[id(47)] HRESULT SaveClosedDocument([in] BSTR path, [out, retval] VARIANT_BOOL* result);
-	// 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 모든 모드에 적용
-	[id(48)] HRESULT SetShortcutLockModes([in] VARIANT_BOOL on, [out, retval] VARIANT_BOOL* result);
+	// 에디터 단축키(Ctrl·Alt 조합, F1~F24) 잠금. 모든 모드에 적용. allow = 잠금 중에도 허용할 키 (예: "Ctrl+C,Ctrl+V")
+	[id(48)] HRESULT SetShortcutLockModes([in] VARIANT_BOOL on, [in, defaultvalue("")] BSTR allow, [out, retval] VARIANT_BOOL* result);
 	[id(49)] HRESULT GetShortcutLockModes([out, retval] VARIANT_BOOL* result);
 	// 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
 	[id(50), propget] HRESULT RecoveryEnabled([out, retval] VARIANT_BOOL* value);
@@ -94,6 +94,8 @@ library HwpxpbLib
 		[id(1)] void Ready();
 		[id(2)] void Loaded([in] BSTR fileName, [in] BSTR table);
 		[id(3)] void ErrorOccurred([in] BSTR message);
+		// CloseDocument 로 문서를 닫은 뒤. result = "save" / "nosave" (취소하면 오지 않음)
+		[id(4)] void Closed([in] BSTR result);
 	};
 
 	[

@@ -10,6 +10,7 @@
 // 2) 호스트(bridge.js)용 진입점 window.rhwpStudio.hwpxpb
 //    studio 안쪽 상태는 모듈 변수라 바깥에서 닿지 않는다. 같은 출처의 bridge.js 가 쓸 함수만 내보낸다.
 //    - fitBodyWidth(): 좌우 여백을 뺀 본문 폭을 화면 폭에 맞추고, 본문 왼쪽 끝이 화면 왼쪽에 오게 스크롤
+//    - bodyAt():       화면 가운데 쪽의 본문 위치·폭 (구역이 바뀌어 여백이 달라졌는지 보는 용도)
 //    - zoom():         지금 배율
 //    - isDirty():      사용자가 문서를 고쳤는지 (저장 여부 묻기)
 //    - setRecovery(on): 복구용 자동 저장 켜기/끄기 (설정 저장 + 일정 바로 반영)
@@ -43,14 +44,17 @@ function hostApi({ view: X, wasm: J, dirty: D, settings: I, bus: Y, clear: C }) 
     `isDirty:()=>${D}.isDirty(),` +
     `setRecovery:e=>{e=!!e;${I}.updateAutosaveSettings({recoveryEnabled:e,idleSaveEnabled:e});${Y}.emit(\`autosave-settings-changed\`)},` +
     `clearDrafts:()=>${C}(),` +
-    // 본문 폭 맞춤. 화면 가운데에 보이는 쪽의 여백을 쓴다 (구역마다 여백이 다를 수 있음)
-    `fitBodyWidth:()=>{let v=${X},w=${J},c=document.getElementById(\`scroll-container\`);` +
-    `if(!v||!c||!(w.pageCount>0))return null;let m=v.getViewportManager(),s=v.virtualScroll,` +
-    `p=s.getPageAtY?.(c.scrollTop+c.clientHeight/2)??0;if(!(p>=0&&p<w.pageCount))p=0;` +
-    `let i=w.getPageInfo(p),l=i.bodyLeft??i.marginLeft,r=i.bodyRight??i.width-i.marginRight,b=r-l;` +
-    `if(!(b>0)||!(c.clientWidth>0))return null;m.setZoom(c.clientWidth/b,void 0,\`none\`);` +
+    // 화면 가운데에 보이는 쪽의 본문 (구역마다 여백이 다를 수 있음)
+    `bodyAt:()=>{let v=${X},w=${J},c=document.getElementById(\`scroll-container\`);` +
+    `if(!v||!c||!(w.pageCount>0))return null;let p=v.virtualScroll.getPageAtY?.(c.scrollTop+c.clientHeight/2)??0;` +
+    `if(!(p>=0&&p<w.pageCount))p=0;let i=w.getPageInfo(p),l=i.bodyLeft??i.marginLeft,r=i.bodyRight??i.width-i.marginRight;` +
+    `return{page:p,bodyLeft:l,bodyWidth:r-l}},` +
+    // 본문 폭 맞춤
+    `fitBodyWidth:()=>{let v=${X},c=document.getElementById(\`scroll-container\`),a=window.rhwpStudio.hwpxpb.bodyAt();` +
+    `if(!a||!(a.bodyWidth>0)||!(c.clientWidth>0))return null;let m=v.getViewportManager(),s=v.virtualScroll,p=a.page,l=a.bodyLeft;` +
+    `m.setZoom(c.clientWidth/a.bodyWidth,void 0,\`none\`);` +
     `let z=m.getZoom();return new Promise(e=>requestAnimationFrame(()=>{` +
-    `m.setScrollLeft(s.getPageLeftResolved(p,s.getTotalWidth())+l*z);e({zoom:z,page:p,bodyWidth:b})}))}` +
+    `m.setScrollLeft(s.getPageLeftResolved(p,s.getTotalWidth())+l*z);e({zoom:z,page:p,bodyLeft:l,bodyWidth:a.bodyWidth})}))}` +
     '},'
   );
 }

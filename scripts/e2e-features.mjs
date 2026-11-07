@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { chromium } from 'playwright';
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 
 const DIST = new URL('../pb/dist/', import.meta.url).pathname;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.png': 'image/png' };
@@ -115,6 +115,51 @@ const viewGeometry = () =>
   await page.setViewportSize({ width: 1000, height: 800 });
 }
 
+// ---- 1b. 구역마다 여백이 다를 때 (AutoFit 이 쪽을 넘기면 다시 맞춤) -----------------------------
+// 빈 문서의 구역을 하나 더 붙이고, 둘째 구역의 여백을 왼쪽 60mm / 오른쪽 15mm 로 (본문 510.2px, 왼쪽 226.8px)
+function twoSections(src) {
+  const files = unzipSync(Buffer.from(src, 'base64'));
+  const sec = strFromU8(files['Contents/section0.xml']);
+  const sec1 = sec.replace(/(<hp:margin [^>]*?)left="\d+" right="\d+"/, '$1left="17008" right="4252"');
+  if (sec1 === sec) throw new Error('시험 문서: 여백을 바꾸지 못했습니다');
+  files['Contents/section1.xml'] = strToU8(sec1);
+  let hpf = strFromU8(files['Contents/content.hpf']);
+  hpf = hpf
+    .replace(/(<opf:item id="section0"[^>]*\/>)/, '$1<opf:item id="section1" href="Contents/section1.xml" media-type="application/xml"/>')
+    .replace(/(<opf:itemref idref="section0"[^>]*\/>)/, '$1<opf:itemref idref="section1" linear="yes"/>');
+  files['Contents/content.hpf'] = strToU8(hpf);
+  return Buffer.from(zipSync(files)).toString('base64');
+}
+{
+  const BODY0 = 566.9;
+  const BODY1 = 510.2;
+  const LEFT1 = 226.8;
+  await call('setAutoFit', true);
+  await call('open', twoSections(b64), 'two.hwpx', 'form');
+  let g = await viewGeometry();
+  check('두 구역 문서: 첫 구역 본문에 맞춤', Math.abs(g.zoom - g.cw / BODY0) < 0.01, JSON.stringify(g));
+  const pages = await inFrame(page, (w) => w.rhwpStudio.hwpxpb.bodyAt() && w.document.querySelectorAll('canvas.document-page-canvas').length);
+  await inFrame(page, (w) => {
+    const sc = w.document.getElementById('scroll-container');
+    sc.scrollTop = sc.scrollHeight;
+  });
+  await page.waitForTimeout(2000);
+  const g1 = await inFrame(page, (w) => {
+    const sc = w.document.getElementById('scroll-container');
+    const r = sc.getBoundingClientRect();
+    const mid = r.top + sc.clientHeight / 2;
+    // 화면 가운데 높이에 걸린 쪽 (둘째 구역)
+    const c = [...sc.querySelectorAll('canvas.document-page-canvas')].map((e) => e.getBoundingClientRect()).find((b) => b.top <= mid && b.bottom >= mid) ??
+      [...sc.querySelectorAll('canvas.document-page-canvas')].map((e) => e.getBoundingClientRect()).pop();
+    return { cw: sc.clientWidth, x: c.left - r.left, zoom: w.rhwpStudio.hwpxpb.zoom(), body: w.rhwpStudio.hwpxpb.bodyAt() };
+  });
+  check('두 구역 문서: 쪽이 2개 이상', pages >= 1 && g1.body?.page >= 1, JSON.stringify({ pages, g1 }));
+  check('쪽을 넘겨 여백이 다른 구역에 오면 다시 맞춤', Math.abs(g1.zoom - g1.cw / BODY1) < 0.01, JSON.stringify(g1));
+  check('왼쪽·오른쪽 여백이 달라도 본문 왼쪽 끝 = 화면 왼쪽', Math.abs(g1.x + LEFT1 * g1.zoom) < 2, JSON.stringify(g1));
+  await call('setAutoFit', false);
+  await call('close');
+}
+
 // ---- 2. 닫을 때 저장 확인 -------------------------------------------------------------------
 {
   check('열자마자는 고치지 않음', (await call('isModified')).modified === false);
@@ -195,6 +240,15 @@ const viewGeometry = () =>
   await page.keyboard.press('Control+b');
   s = await seen();
   check('잠금을 끄면 Ctrl+B 가 에디터에 감', s.includes('b+ctrl'), JSON.stringify(s));
+  // 허용 키
+  const r = await call('setShortcutLockModes', true, 'Ctrl+B, ctrl + shift + z');
+  check('허용 키 지정', r.locked === true && r.allow.includes('ctrl+b') && r.allow.includes('ctrl+shift+z'), JSON.stringify(r));
+  for (const k of ['Control+b', 'Control+i', 'Control+Shift+z']) await page.keyboard.press(k);
+  s = await seen();
+  check('허용 키만 통과 (Ctrl+B, Ctrl+Shift+Z), Ctrl+I 는 막힘', s.includes('b+ctrl') && s.filter((k) => k.toLowerCase() === 'z+ctrl').length === 1 && !s.includes('i+ctrl'), JSON.stringify(s));
+  check('잘못된 허용 키는 오류', (await call('setShortcutLockModes', true, 'Ctrl+')).ok === false);
+  check('allow 를 빼면 목록 유지', (await call('setShortcutLockModes', true)).allow.length === 2);
+  check('allow "" 이면 비움', (await call('setShortcutLockModes', false, '')).allow.length === 0);
   await call('close');
 }
 
