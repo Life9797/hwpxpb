@@ -74,13 +74,16 @@ function* iterFields(xml) {
     const endPos = xml.indexOf(`<hp:fieldEnd beginIDRef="${id}"`, start);
     if (endPos < 0) continue;
     const end = xml.lastIndexOf('<hp:ctrl>', endPos);
+    const guide = guideText(xml.slice(m.index, blockEnd));
+    // 에디터(rhwp)는 직접 입력해도 dirty="0" 그대로 저장한다. 내용이 안내문과 다르면 입력된 값으로 본다
+    const shown = contentText(xml.slice(start, end)).trim();
     yield {
       name: attr(tag, 'name'),
       id: Number(id) || 0,
       tag,
       tagStart: m.index,
-      guide: guideText(xml.slice(m.index, blockEnd)),
-      dirty: attr(tag, 'dirty') === '1',
+      guide,
+      dirty: attr(tag, 'dirty') === '1' || (shown !== '' && shown !== guide),
       start,
       end,
     };

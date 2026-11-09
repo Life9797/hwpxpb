@@ -153,3 +153,16 @@ test('누름틀 묶음: 컬럼__x 누름틀은 컬럼 하나로 묶어 "|" 로 �
   assert.equal(new HwpxDocument(doc.toBytes()).extract().values.ADDR, '대구|중구|동성로');
   assert.equal(new HwpxDocument(doc.toBytes()).extract({ groupSep: ',' }).values.ADDR, '대구,중구,동성로');
 });
+
+test('extract: 에디터에서 직접 입력해 dirty="0" 인 채로 저장된 누름틀도 값을 돌려준다', () => {
+  const doc = new HwpxDocument(makeHwpx());
+  const name = 'Contents/section0.xml';
+  // rhwp 는 입력해도 dirty 를 안 바꾸고 안내문 자리에 값을 쓴다
+  const xml = strFromU8(doc.entries[name]).replace('<hp:t> 성명</hp:t>', '<hp:t>KIM</hp:t>');
+  doc.entries[name] = new TextEncoder().encode(xml);
+  const values = doc.extract().values;
+  assert.equal(values.PT_NM, 'KIM');
+  assert.equal(values.MEMO, '');
+  // 인쇄용 안내문 지우기에서 입력값이 지워지지 않는다
+  assert.match(strFromU8(doc.hideGuides().entries[name]), /<hp:t>KIM<\/hp:t>/);
+});
