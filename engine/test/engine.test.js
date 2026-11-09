@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
-import { HwpxDocument } from '../src/index.js';
+import { HwpxDocument, replaceText } from '../src/index.js';
 import { makeHwpx } from './fixture.js';
 
 const open = () => new HwpxDocument(makeHwpx());
@@ -165,4 +165,18 @@ test('extract: 에디터에서 직접 입력해 dirty="0" 인 채로 저장된 �
   assert.equal(values.MEMO, '');
   // 인쇄용 안내문 지우기에서 입력값이 지워지지 않는다
   assert.match(strFromU8(doc.hideGuides().entries[name]), /<hp:t>KIM<\/hp:t>/);
+});
+
+test('replaceText: XML 전체 일괄 치환, wstring 길이 보정, 함수 호출형', () => {
+  const doc = open();
+  doc.entries['Contents/section0.xml'] = new TextEncoder().encode(
+    new TextDecoder().decode(doc.entries['Contents/section0.xml']) + '<x a="ptinfo">Name:wstring:9:ptinfo_nm z</x>');
+  doc.replaceText({ ptinfo: 'ptif', '': 'x' });
+  const xml = doc.xml('Contents/section0.xml');
+  assert.ok(!xml.includes('ptinfo'));
+  assert.ok(xml.includes('<x a="ptif">Name:wstring:7:ptif_nm z</x>'));
+  assert.equal(doc.replaced, 2);
+  const out = new HwpxDocument(replaceText(doc.toBytes(), { ptif: '홍' }));
+  assert.ok(out.xml('Contents/section0.xml').includes('Name:wstring:4:홍_nm z'));
+  assert.equal(out.extract().values.RESULT, '정상');
 });

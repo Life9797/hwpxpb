@@ -152,3 +152,18 @@ class EngineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplaceTextTest(unittest.TestCase):
+    def test_replace_text(self):
+        from hwpxpb import replace_text
+        doc = HwpxDocument(make_hwpx())
+        doc._set_xml("Contents/section0.xml", doc.xml("Contents/section0.xml") + '<x a="ptinfo">Name:wstring:9:ptinfo_nm z</x>')
+        doc.replace_text({"ptinfo": "ptif", "": "x"})
+        xml = doc.xml("Contents/section0.xml")
+        self.assertNotIn("ptinfo", xml)
+        self.assertIn('<x a="ptif">Name:wstring:7:ptif_nm z</x>', xml)
+        self.assertEqual(doc.replaced, 2)
+        out = HwpxDocument(replace_text(doc.to_bytes(), {"ptif": "홍"}))
+        self.assertIn("Name:wstring:4:홍_nm z", out.xml("Contents/section0.xml"))
+        self.assertEqual(out.extract()["values"]["RESULT"], "정상")

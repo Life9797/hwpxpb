@@ -132,6 +132,39 @@ export class HwpxDocument {
     return zipSync(files);
   }
 
+  /**
+   * XML 원문 일괄 치환. 모든 .xml/.hpf 엔트리(본문·머리말·문서정보)에서 글자를 바꾼다.
+   * 예: doc.replaceText({ ptinfo: 'ptif' }).toBytes()
+   * - 키는 긴 것부터 한 번에 바꾼다(바뀐 결과를 다시 바꾸지 않음). 대소문자 구분.
+   * - 누름틀 속성의 `xxx:wstring:길이:값` 안에서 바뀌면 길이 표기도 고친다.
+   * - 값은 XML 원문에 그대로 들어간다(< & 등은 직접 이스케이프).
+   * 바꾼 개수는 this.replaced 에 남는다.
+   */
+  replaceText(map) {
+    const keys = Object.keys(map).filter((k) => k !== '').sort((a, b) => b.length - a.length);
+    this.replaced = 0;
+    if (!keys.length) return this;
+    const re = new RegExp(keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    const sub = (t) => t.replace(re, (m) => (this.replaced++, String(map[m])));
+    for (const name of Object.keys(this.entries)) {
+      if (!/\.(xml|hpf)$/i.test(name)) continue;
+      const xml = this.xml(name);
+      if (!keys.some((k) => xml.includes(k))) continue;
+      let out = '';
+      let i = 0;
+      const ws = /wstring:(\d+):/g;
+      for (let m; (m = ws.exec(xml)); ) {
+        const vs = m.index + m[0].length;
+        const ve = vs + Number(m[1]);
+        const val = sub(xml.slice(vs, ve));
+        out += sub(xml.slice(i, m.index)) + `wstring:${val.length}:` + val;
+        i = ws.lastIndex = ve;
+      }
+      this.entries[name] = enc.encode(out + sub(xml.slice(i)));
+    }
+    return this;
+  }
+
   /** 문서 정보(키워드/설명)의 "dbtable=XXX" */
   get dbTable() {
     const hpf = this.entries['Contents/content.hpf'];
@@ -407,4 +440,9 @@ function splitParts(value, sep, n) {
   const parts = sep ? text.split(sep) : [text];
   if (parts.length <= n) return parts;
   return [...parts.slice(0, n - 1), parts.slice(n - 1).join(sep)];
+}
+
+/** 함수 한 번으로: replaceText(bytes, { ptinfo: 'ptif' }) → 새 HWPX 바이트 */
+export function replaceText(bytes, map) {
+  return new HwpxDocument(bytes).replaceText(map).toBytes();
 }

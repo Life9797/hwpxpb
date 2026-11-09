@@ -173,6 +173,52 @@ class HwpxDocument:
                     zf.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         return buf.getvalue()
 
+    def replace_text(self, mapping: dict) -> "HwpxDocument":
+        """XML 원문 일괄 치환. 모든 .xml/.hpf 엔트리에서 글자를 바꾼다.
+        예: doc.replace_text({"ptinfo": "ptif"}).to_bytes()
+        키는 긴 것부터 한 번에 바꾸고(연쇄 치환 없음), `wstring:길이:값` 안에서 바뀌면 길이도 고친다.
+        값은 XML 원문에 그대로 들어간다. 바꾼 개수는 self.replaced 에 남는다."""
+        keys = sorted((k for k in mapping if k != ""), key=len, reverse=True)
+        self.replaced = 0
+        if not keys:
+            return self
+        pat = re.compile("|".join(re.escape(k) for k in keys))
+
+        def sub(t: str) -> str:
+            def one(m):
+                self.replaced += 1
+                return str(mapping[m.group(0)])
+            return pat.sub(one, t)
+
+        def u16(t: str) -> int:  # 길이 표기는 UTF-16 글자 수 (JS 엔진과 같음)
+            return len(t.encode("utf-16-le", "surrogatepass")) // 2
+
+        def take(t: str, start: int, n: int) -> int:  # start 부터 UTF-16 n 단위 끝 위치
+            i = start
+            while n > 0 and i < len(t):
+                n -= 2 if ord(t[i]) > 0xFFFF else 1
+                i += 1
+            return i
+
+        for name in list(self.entries):
+            if not re.search(r"\.(xml|hpf)$", name, re.I):
+                continue
+            xml = self.xml(name)
+            if not any(k in xml for k in keys):
+                continue
+            out, i = [], 0
+            ws = re.compile(r"wstring:(\d+):")
+            pos = 0
+            while (m := ws.search(xml, pos)):
+                vs = m.end()
+                ve = take(xml, vs, int(m.group(1)))
+                val = sub(xml[vs:ve])
+                out.append(sub(xml[i:m.start()]) + f"wstring:{u16(val)}:" + val)
+                i = pos = ve
+            out.append(sub(xml[i:]))
+            self._set_xml(name, "".join(out))
+        return self
+
     @property
     def db_table(self) -> str | None:
         """문서 정보(키워드/설명)의 "dbtable=XXX" """
@@ -422,3 +468,8 @@ class HwpxDocument:
             "unknown": sorted(k for k in keys if k not in known),
             "rejected": sorted(k for k in keys if k in known and k not in applied_cols),
         }
+
+
+def replace_text(data: bytes, mapping: dict) -> bytes:
+    """함수 한 번으로: replace_text(data, {"ptinfo": "ptif"}) → 새 HWPX 바이트"""
+    return HwpxDocument(data).replace_text(mapping).to_bytes()

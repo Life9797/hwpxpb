@@ -26,6 +26,21 @@ HWPX(한글) 양식의 **누름틀·체크박스·라디오·드롭다운 값만
 
 추출 결과 예: `{"table":"TB_PRESCRIPTION","values":{"PT_NM":"홍길동","AGREE_YN":"Y","ITEM_CD":"01,02"}}`
 
+## XML 일괄 치환
+
+값 규칙과 별개로 XML 원문의 글자를 한꺼번에 바꿉니다 (본문·머리말·문서정보 전체, 대소문자 구분, 누름틀 속성 `wstring:길이:` 표기도 고침).
+
+```js
+import { HwpxDocument, replaceText } from 'hwpx-form-engine';
+const out = replaceText(bytes, { ptinfo: 'ptif' });                          // 함수 한 번
+const out2 = new HwpxDocument(bytes).replaceText({ ptinfo: 'ptif' }).toBytes(); // 메서드 체인
+```
+
+```python
+from hwpxpb import HwpxDocument, replace_text
+out = replace_text(data, {"ptinfo": "ptif"})
+```
+
 ## 개발
 
 ```bash
