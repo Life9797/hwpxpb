@@ -93,13 +93,16 @@ def iter_fields(xml: str) -> Iterator[dict]:
         if end_pos < 0:
             continue
         end = xml.rfind("<hp:ctrl>", 0, end_pos)
+        guide = guide_text(xml[m.start():block_end])
+        # 에디터(rhwp)는 직접 입력해도 dirty="0" 그대로 저장한다. 내용이 안내문과 다르면 입력된 값으로 본다
+        shown = content_text(xml[start:end]).strip()
         yield {
             "name": attr(tag, "name"),
             "id": int(fid) if (fid or "").isdigit() else 0,
             "tag": tag,
             "tag_start": m.start(),
-            "guide": guide_text(xml[m.start():block_end]),
-            "dirty": attr(tag, "dirty") == "1",
+            "guide": guide,
+            "dirty": attr(tag, "dirty") == "1" or (shown != "" and shown != guide),
             "start": start,
             "end": end,
         }

@@ -7,7 +7,8 @@
   ],
   "scripts": {
     "test": "npm test --workspaces",
-    "e2e": "node scripts/e2e-features.mjs"
+    "e2e": "node scripts/e2e-features.mjs",
+    "hwpx": "node scripts/hwpx-xml.mjs"
   },
   "devDependencies": {
     "playwright": "^1.63.0"
