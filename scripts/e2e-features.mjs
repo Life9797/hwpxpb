@@ -303,6 +303,39 @@ const IDLE = 7000; // 쉴 때 자동 저장(5초) + 여유
   check('?recovery=1: 켜짐', (await e.call('getRecovery')).recovery === true);
 }
 
+// ---- 5. 누름틀 빠른 입력 (첫 글자 직후 화면 갱신 전에 둘째 키) ------------------------------------
+{
+  const e = await openEditor();
+  const files = unzipSync(Buffer.from(b64, 'base64'));
+  let sec = strFromU8(files['Contents/section0.xml']);
+  const field =
+    '<hp:run charPrIDRef="0"><hp:t>이름: </hp:t><hp:ctrl><hp:fieldBegin id="101" type="CLICK_HERE" name="PT_NM" editable="1" dirty="0" zorder="-1" fieldid="1">' +
+    '<hp:parameters cnt="2" name=""><hp:integerParam name="Prop">9</hp:integerParam><hp:stringParam name="Command" xml:space="preserve">Clickhere:set:40:Direction:wstring:2:성명 HelpState:wstring:0:  </hp:stringParam></hp:parameters>' +
+    '</hp:fieldBegin></hp:ctrl><hp:t>성명</hp:t><hp:ctrl><hp:fieldEnd beginIDRef="101" fieldid="1"/></hp:ctrl><hp:t> 끝</hp:t></hp:run>';
+  const at = sec.indexOf('<hp:linesegarray>');
+  sec = sec.slice(0, at) + field + sec.slice(at);
+  files['Contents/section0.xml'] = strToU8(sec);
+  await e.call('open', Buffer.from(zipSync(files)).toString('base64'), 'field.hwpx', 'form');
+  await inFrame(e.page, (w) => w.rhwpStudio.formNavigation.moveField(1));
+  await e.page.waitForTimeout(300);
+  // 두 키를 한 작업 안에서 (rAF 없이) 넣는다
+  await inFrame(e.page, (w) => {
+    const ta = w.document.activeElement;
+    for (const ch of 'sd') {
+      ta.dispatchEvent(new w.KeyboardEvent('keydown', { key: ch, bubbles: true, cancelable: true }));
+      ta.value += ch;
+      ta.dispatchEvent(new w.InputEvent('input', { data: ch, inputType: 'insertText', bubbles: true }));
+    }
+  });
+  await e.page.waitForTimeout(300);
+  check('빠르게 친 두 글자가 모두 누름틀 안에', (await e.call('getFields')).values?.PT_NM === 'sd');
+  await e.page.keyboard.press('Backspace');
+  await e.page.keyboard.press('Backspace');
+  await e.page.waitForTimeout(300);
+  check('Backspace 로 누름틀 값을 지울 수 있음', (await e.call('getFields')).values?.PT_NM === '');
+  await e.page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failed ? `\n${failed} 개 실패` : '\n모두 통과');

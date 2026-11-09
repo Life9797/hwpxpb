@@ -15,6 +15,11 @@
 //    - isDirty():      사용자가 문서를 고쳤는지 (저장 여부 묻기)
 //    - setRecovery(on): 복구용 자동 저장 켜기/끄기 (설정 저장 + 일정 바로 반영)
 //    - clearDrafts():  남아 있는 복구본을 모두 지운다
+//
+// 3) 누름틀 빠른 입력 보정
+//    빈 누름틀(안내문)에 첫 글자를 치면 studio 는 활성 누름틀을 풀고 다음 화면 갱신(rAF)에서 다시 잡는다.
+//    그 사이에 둘째 키가 오면(빠르게 치거나 클릭 직후) 누름틀 끝 경계의 글자가 누름틀 바깥에 들어가고,
+//    커서도 바깥이라 양식 모드에서 지울 수 없게 된다. 입력 직전에 커서가 누름틀 안이면 활성 누름틀을 다시 잡는다.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -59,8 +64,14 @@ function hostApi({ view: X, wasm: J, dirty: D, settings: I, bus: Y, clear: C }) 
   );
 }
 
+const FIELD_INPUT =
+  'prepareClickHereInputPosition(){let e=this.cursor.getPosition();try{let t=this.wasm.getFieldInfoAt(e),n=t.startCharIdx??-1;';
+const FIELD_KEEP =
+  'if(t.inField&&t.fieldType===`clickhere`&&!t.isGuide&&!this.isAtExitedFieldStart(e,t)&&!this.isAtExitedFieldEnd(e,t))this.wasm.setActiveField(e);/*hwpxpb-keep-field*/';
+
 let patched = 0;
 let hosted = 0;
+let fieldFixed = 0;
 for (const f of fs.readdirSync(dir).filter((n) => /^index-.*\.js$/.test(n))) {
   const p = path.join(dir, f);
   let s = fs.readFileSync(p, 'utf8');
@@ -89,6 +100,13 @@ for (const f of fs.readdirSync(dir).filter((n) => /^index-.*\.js$/.test(n))) {
       console.log(`호스트 진입점(rhwpStudio.hwpxpb): ${f} ${JSON.stringify(names)}`);
     }
   }
+  if (s.includes('/*hwpxpb-keep-field*/')) fieldFixed++;
+  else if (s.includes(FIELD_INPUT)) {
+    s = s.replace(FIELD_INPUT, FIELD_INPUT + FIELD_KEEP);
+    fieldFixed++;
+    changed = true;
+    console.log(`누름틀 빠른 입력 보정: ${f}`);
+  }
   if (changed) fs.writeFileSync(p, s);
 }
 if (!patched) {
@@ -97,5 +115,9 @@ if (!patched) {
 }
 if (!hosted) {
   console.error('rhwp-studio 에 rhwpStudio.hwpxpb 를 넣지 못했습니다 (rhwp 버전이 바뀌었으면 이 스크립트를 고치세요)');
+  process.exit(1);
+}
+if (!fieldFixed) {
+  console.error('rhwp-studio 의 누름틀 입력 위치 함수를 찾지 못했습니다 (rhwp 버전이 바뀌었으면 이 스크립트를 고치세요)');
   process.exit(1);
 }
