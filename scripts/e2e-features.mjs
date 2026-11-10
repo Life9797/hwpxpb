@@ -336,6 +336,22 @@ const IDLE = 7000; // 쉴 때 자동 저장(5초) + 여유
   await e.page.close();
 }
 
+// ---- 6. 잘못된 파일을 열어도 보던 문서·다음 호출은 그대로 ------------------------------------
+{
+  const e = await openEditor();
+  const good = (await e.call('getDocument')).hwpx;
+  check('정상 문서 열기', (await e.call('open', good, 'a.hwpx', 'form')).ok === true);
+  const bad = await e.call('open', Buffer.from(zipSync({ a: strToU8('x') })).subarray(0, 40).toString('base64'), 'bad.hwpx', 'form');
+  check('깨진 HWPX: 이유가 담긴 오류', bad.ok === false && /손상됐거나 덜 저장/.test(bad.error), bad.error);
+  const drm = await e.call('open', Buffer.from('not a zip file').toString('base64'), 'drm.hwpx', 'form');
+  check('ZIP 아님: DRM 안내', drm.ok === false && /DRM/.test(drm.error), drm.error);
+  check('실패 뒤에도 값 추출 됨', (await e.call('getFields')).ok === true);
+  check('실패 뒤에도 문서 받기 됨', (await e.call('getDocument')).ok === true);
+  check('실패 뒤 다시 열기 됨', (await e.call('open', good, 'a.hwpx', 'form')).ok === true);
+  check('reset 뒤 열기 됨', (await e.call('reset')).ok === true && (await e.call('open', good, 'a.hwpx', 'form')).ok === true);
+  await e.page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failed ? `\n${failed} 개 실패` : '\n모두 통과');

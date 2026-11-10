@@ -167,3 +167,15 @@ class ReplaceTextTest(unittest.TestCase):
         out = HwpxDocument(replace_text(doc.to_bytes(), {"ptif": "홍"}))
         self.assertIn("Name:wstring:4:홍_nm z", out.xml("Contents/section0.xml"))
         self.assertEqual(out.extract()["values"]["RESULT"], "정상")
+
+
+class NotHwpxTest(unittest.TestCase):
+    def test_reasons(self):
+        def msg(b):
+            with self.assertRaises(ValueError) as c:
+                HwpxDocument(b)
+            return str(c.exception)
+        self.assertIn("비어 있습니다", msg(b""))
+        self.assertIn("HWP(바이너리)", msg(b"\xd0\xcf\x11\xe0\x01"))
+        self.assertIn("손상됐거나 덜 저장", msg(make_hwpx()[:100]))
+        self.assertIn("DRM", msg(b"\x01\x02\x03\x04\x05"))

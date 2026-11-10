@@ -109,12 +109,26 @@ function radioMatches(tag, wanted) {
   return want === name || want === attr(tag, 'caption') || (name.includes(SEP) && name.slice(name.indexOf(SEP) + SEP.length) === want);
 }
 
+/** ZIP 으로 못 여는 이유를 사람이 알 수 있게 (Python 엔진 not_hwpx_reason 과 같은 문구) */
+export function notHwpxReason(u8, err) {
+  const n = u8.length;
+  const head = Array.from(u8.subarray(0, 4), (b) => b.toString(16).padStart(2, '0')).join(' ');
+  if (n === 0) return 'HWPX 파일이 아닙니다: 내용이 비어 있습니다 (0바이트)';
+  if (head === 'd0 cf 11 e0') return 'HWPX 파일이 아닙니다: HWP(바이너리) 파일입니다. 한글에서 HWPX 로 저장해 쓰세요';
+  if (head.startsWith('50 4b')) return `HWPX 파일이 손상됐거나 덜 저장됐습니다 (${n}바이트${err ? `, ${err.message ?? err}` : ''}). 파일 쓰기가 끝난 뒤(닫은 뒤) 여세요`;
+  return `HWPX(ZIP) 형식이 아닙니다 (${n}바이트, 앞부분 ${head}). 문서보안(DRM) 암호화나 base64 오류일 수 있습니다`;
+}
+
 // ---- 문서 열기/저장 --------------------------------------------------------
 export class HwpxDocument {
   /** @param {Uint8Array|ArrayBuffer} bytes */
   constructor(bytes) {
     const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    this.entries = unzipSync(u8); // 객체 키 순서 = ZIP 엔트리 순서
+    try {
+      this.entries = unzipSync(u8); // 객체 키 순서 = ZIP 엔트리 순서
+    } catch (e) {
+      throw new Error(notHwpxReason(u8, e));
+    }
     if (!this.entries['mimetype']) throw new Error('HWPX 파일이 아닙니다 (mimetype 없음)');
     this.sections = Object.keys(this.entries).filter((n) => SECTION_RE.test(n)).sort();
   }

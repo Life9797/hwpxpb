@@ -180,3 +180,11 @@ test('replaceText: XML 전체 일괄 치환, wstring 길이 보정, 함수 호�
   assert.ok(out.xml('Contents/section0.xml').includes('Name:wstring:4:홍_nm z'));
   assert.equal(out.extract().values.RESULT, '정상');
 });
+
+test('HWPX 가 아닌 입력은 이유를 알려 준다', () => {
+  const msg = (u8) => { try { new HwpxDocument(u8); } catch (e) { return e.message; } };
+  assert.match(msg(new Uint8Array()), /비어 있습니다/);
+  assert.match(msg(new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 1])), /HWP\(바이너리\)/);
+  assert.match(msg(makeHwpx().subarray(0, 100)), /손상됐거나 덜 저장/);
+  assert.match(msg(new Uint8Array([1, 2, 3, 4, 5])), /DRM/);
+});

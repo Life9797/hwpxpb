@@ -144,13 +144,26 @@ def _apply_edits(xml: str, edits: list[tuple[int, int, str]]) -> str:
 
 
 # ---- 문서 ----------------------------------------------------------------
+def not_hwpx_reason(data: bytes, err: Exception | None = None) -> str:
+    """ZIP 으로 못 여는 이유 (JS 엔진 notHwpxReason 과 같은 문구)"""
+    n = len(data)
+    head = " ".join(f"{b:02x}" for b in data[:4])
+    if n == 0:
+        return "HWPX 파일이 아닙니다: 내용이 비어 있습니다 (0바이트)"
+    if head == "d0 cf 11 e0":
+        return "HWPX 파일이 아닙니다: HWP(바이너리) 파일입니다. 한글에서 HWPX 로 저장해 쓰세요"
+    if head.startswith("50 4b"):
+        return f"HWPX 파일이 손상됐거나 덜 저장됐습니다 ({n}바이트{', ' + str(err) if err else ''}). 파일 쓰기가 끝난 뒤(닫은 뒤) 여세요"
+    return f"HWPX(ZIP) 형식이 아닙니다 ({n}바이트, 앞부분 {head}). 문서보안(DRM) 암호화나 base64 오류일 수 있습니다"
+
+
 class HwpxDocument:
     def __init__(self, data: bytes):
         try:
             zf = zipfile.ZipFile(io.BytesIO(bytes(data)))
             self.entries: dict[str, bytes] = {i.filename: zf.read(i) for i in zf.infolist()}
-        except (zipfile.BadZipFile, ValueError) as e:
-            raise ValueError(f"HWPX 파일이 아닙니다 ({e})") from e
+        except (zipfile.BadZipFile, ValueError, EOFError, OSError) as e:
+            raise ValueError(not_hwpx_reason(bytes(data), e)) from e
         if "mimetype" not in self.entries:
             raise ValueError("HWPX 파일이 아닙니다 (mimetype 없음)")
         self.sections = sorted(n for n in self.entries if SECTION_RE.match(n))
