@@ -144,6 +144,13 @@ def _apply_edits(xml: str, edits: list[tuple[int, int, str]]) -> str:
 
 
 # ---- 문서 ----------------------------------------------------------------
+def keep_order(current: list[str], prev: str) -> list[str]:
+    """이전 순서를 지키고 새 컬럼은 뒤에 (JS keepOrder 와 같음)"""
+    have = set(current)
+    kept = list(dict.fromkeys(c.strip() for c in re.split(r"[\t,\r\n]+", prev) if c.strip() in have))
+    return kept + [c for c in current if c not in kept]
+
+
 def not_hwpx_reason(data: bytes, err: Exception | None = None) -> str:
     """ZIP 으로 못 여는 이유 (JS 엔진 notHwpxReason 과 같은 문구)"""
     n = len(data)
@@ -265,7 +272,10 @@ class HwpxDocument:
         return out
 
     def columns(self, order: str = "document") -> list[str]:
-        """DB 컬럼 이름 목록. order="created" 면 넣은 순서: 누름틀(id 순) 다음 양식 개체(tabOrder 순)"""
+        """DB 컬럼 이름 목록. order="created" 면 넣은 순서: 누름틀(id 순) 다음 양식 개체(tabOrder 순).
+        order="keep:이전목록"(탭·쉼표) 이면 이전 순서를 지키고 새 컬럼만 뒤에 붙인다 (없어진 컬럼은 빠짐)."""
+        if str(order).startswith("keep:"):
+            return keep_order(self.columns("created"), str(order)[5:])
         if order != "created":
             return list(self.extract()["values"].keys())
         items = sorted(enumerate(self.schema()), key=lambda p: (p[1]["type"] != "clickhere", p[1]["order"], p[0]))

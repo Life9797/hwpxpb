@@ -188,3 +188,11 @@ test('HWPX 가 아닌 입력은 이유를 알려 준다', () => {
   assert.match(msg(makeHwpx().subarray(0, 100)), /손상됐거나 덜 저장/);
   assert.match(msg(new Uint8Array([1, 2, 3, 4, 5])), /DRM/);
 });
+
+test('columns keep: 이전 순서 유지, 새 컬럼은 뒤에, 없어진 컬럼은 빠짐', () => {
+  const d = open();
+  const all = d.columns('created');
+  const prev = ['GONE', ...all.slice(1).reverse()].join('\t');
+  assert.deepEqual(d.columns('keep:' + prev), [...all.slice(1).reverse(), all[0]]);
+  assert.deepEqual(d.columns('keep:'), all);
+});

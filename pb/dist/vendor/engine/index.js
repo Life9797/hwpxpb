@@ -342,8 +342,11 @@ export class HwpxDocument {
    * order='document' 는 문서에 나오는 순서(extract 와 같음),
    * order='created' 는 개체를 넣은 순서: 누름틀(id 순) 다음에 양식 개체(tabOrder 순).
    * HWPX 에는 누름틀과 양식 개체를 함께 비교할 시각 정보가 없어서 두 무리는 이 순서로 잇는다.
+   * order='keep:이전목록'(탭 또는 쉼표로 이음) 은 이전 목록 순서를 그대로 두고, 새로 생긴 컬럼만 뒤에 붙인다
+   * (없어진 컬럼은 빠진다). 양식에 개체를 중간에 넣어도 기존 컬럼 위치가 밀리지 않는다.
    */
   columns(order = 'document') {
+    if (String(order).startsWith('keep:')) return keepOrder(this.columns('created'), String(order).slice(5));
     if (order !== 'created') return Object.keys(this.extract().values);
     const items = this.schema().map((it, i) => ({ ...it, i }));
     items.sort((a, b) => (a.type !== 'clickhere') - (b.type !== 'clickhere') || a.order - b.order || a.i - b.i);
@@ -445,6 +448,13 @@ export class HwpxDocument {
       rejected: keys.filter((k) => known.has(k) && !appliedCols.has(k)).sort(),
     };
   }
+}
+
+/** 이전 순서를 지키고 새 컬럼은 뒤에 (Python keep_order 와 같음) */
+function keepOrder(current, prev) {
+  const have = new Set(current);
+  const kept = [...new Set(prev.split(/[\t,\r\n]+/).map((c) => c.trim()).filter((c) => have.has(c)))];
+  return [...kept, ...current.filter((c) => !kept.includes(c))];
 }
 
 /** 값을 구분자로 n 조각까지 나눈다. 조각이 남으면 마지막 칸에 나머지를 그대로 붙인다 */

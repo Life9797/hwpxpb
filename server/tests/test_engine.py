@@ -179,3 +179,12 @@ class NotHwpxTest(unittest.TestCase):
         self.assertIn("HWP(바이너리)", msg(b"\xd0\xcf\x11\xe0\x01"))
         self.assertIn("손상됐거나 덜 저장", msg(make_hwpx()[:100]))
         self.assertIn("DRM", msg(b"\x01\x02\x03\x04\x05"))
+
+
+class KeepOrderTest(unittest.TestCase):
+    def test_keep(self):
+        d = HwpxDocument(make_hwpx())
+        allc = d.columns("created")
+        prev = "\t".join(["GONE", *reversed(allc[1:])])
+        self.assertEqual(d.columns("keep:" + prev), [*reversed(allc[1:]), allc[0]])
+        self.assertEqual(d.columns("keep:"), allc)
