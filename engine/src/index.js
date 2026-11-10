@@ -109,12 +109,26 @@ function radioMatches(tag, wanted) {
   return want === name || want === attr(tag, 'caption') || (name.includes(SEP) && name.slice(name.indexOf(SEP) + SEP.length) === want);
 }
 
+/** ZIP 으로 못 여는 이유를 사람이 알 수 있게 (Python 엔진 not_hwpx_reason 과 같은 문구) */
+export function notHwpxReason(u8, err) {
+  const n = u8.length;
+  const head = Array.from(u8.subarray(0, 4), (b) => b.toString(16).padStart(2, '0')).join(' ');
+  if (n === 0) return 'HWPX 파일이 아닙니다: 내용이 비어 있습니다 (0바이트)';
+  if (head === 'd0 cf 11 e0') return 'HWPX 파일이 아닙니다: HWP(바이너리) 파일입니다. 한글에서 HWPX 로 저장해 쓰세요';
+  if (head.startsWith('50 4b')) return `HWPX 파일이 손상됐거나 덜 저장됐습니다 (${n}바이트${err ? `, ${err.message ?? err}` : ''}). 파일 쓰기가 끝난 뒤(닫은 뒤) 여세요`;
+  return `HWPX(ZIP) 형식이 아닙니다 (${n}바이트, 앞부분 ${head}). 문서보안(DRM) 암호화나 base64 오류일 수 있습니다`;
+}
+
 // ---- 문서 열기/저장 --------------------------------------------------------
 export class HwpxDocument {
   /** @param {Uint8Array|ArrayBuffer} bytes */
   constructor(bytes) {
     const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-    this.entries = unzipSync(u8); // 객체 키 순서 = ZIP 엔트리 순서
+    try {
+      this.entries = unzipSync(u8); // 객체 키 순서 = ZIP 엔트리 순서
+    } catch (e) {
+      throw new Error(notHwpxReason(u8, e));
+    }
     if (!this.entries['mimetype']) throw new Error('HWPX 파일이 아닙니다 (mimetype 없음)');
     this.sections = Object.keys(this.entries).filter((n) => SECTION_RE.test(n)).sort();
   }
@@ -130,6 +144,39 @@ export class HwpxDocument {
       files[name] = name === 'mimetype' ? [data, { level: 0 }] : [data, { level: 6 }];
     }
     return zipSync(files);
+  }
+
+  /**
+   * XML 원문 일괄 치환. 모든 .xml/.hpf 엔트리(본문·머리말·문서정보)에서 글자를 바꾼다.
+   * 예: doc.replaceText({ ptinfo: 'ptif' }).toBytes()
+   * - 키는 긴 것부터 한 번에 바꾼다(바뀐 결과를 다시 바꾸지 않음). 대소문자 구분.
+   * - 누름틀 속성의 `xxx:wstring:길이:값` 안에서 바뀌면 길이 표기도 고친다.
+   * - 값은 XML 원문에 그대로 들어간다(< & 등은 직접 이스케이프).
+   * 바꾼 개수는 this.replaced 에 남는다.
+   */
+  replaceText(map) {
+    const keys = Object.keys(map).filter((k) => k !== '').sort((a, b) => b.length - a.length);
+    this.replaced = 0;
+    if (!keys.length) return this;
+    const re = new RegExp(keys.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
+    const sub = (t) => t.replace(re, (m) => (this.replaced++, String(map[m])));
+    for (const name of Object.keys(this.entries)) {
+      if (!/\.(xml|hpf)$/i.test(name)) continue;
+      const xml = this.xml(name);
+      if (!keys.some((k) => xml.includes(k))) continue;
+      let out = '';
+      let i = 0;
+      const ws = /wstring:(\d+):/g;
+      for (let m; (m = ws.exec(xml)); ) {
+        const vs = m.index + m[0].length;
+        const ve = vs + Number(m[1]);
+        const val = sub(xml.slice(vs, ve));
+        out += sub(xml.slice(i, m.index)) + `wstring:${val.length}:` + val;
+        i = ws.lastIndex = ve;
+      }
+      this.entries[name] = enc.encode(out + sub(xml.slice(i)));
+    }
+    return this;
   }
 
   /** 문서 정보(키워드/설명)의 "dbtable=XXX" */
@@ -295,8 +342,11 @@ export class HwpxDocument {
    * order='document' 는 문서에 나오는 순서(extract 와 같음),
    * order='created' 는 개체를 넣은 순서: 누름틀(id 순) 다음에 양식 개체(tabOrder 순).
    * HWPX 에는 누름틀과 양식 개체를 함께 비교할 시각 정보가 없어서 두 무리는 이 순서로 잇는다.
+   * order='keep:이전목록'(탭 또는 쉼표로 이음) 은 이전 목록 순서를 그대로 두고, 새로 생긴 컬럼만 뒤에 붙인다
+   * (없어진 컬럼은 빠진다). 양식에 개체를 중간에 넣어도 기존 컬럼 위치가 밀리지 않는다.
    */
   columns(order = 'document') {
+    if (String(order).startsWith('keep:')) return keepOrder(this.columns('created'), String(order).slice(5));
     if (order !== 'created') return Object.keys(this.extract().values);
     const items = this.schema().map((it, i) => ({ ...it, i }));
     items.sort((a, b) => (a.type !== 'clickhere') - (b.type !== 'clickhere') || a.order - b.order || a.i - b.i);
@@ -400,6 +450,13 @@ export class HwpxDocument {
   }
 }
 
+/** 이전 순서를 지키고 새 컬럼은 뒤에 (Python keep_order 와 같음) */
+function keepOrder(current, prev) {
+  const have = new Set(current);
+  const kept = [...new Set(prev.split(/[\t,\r\n]+/).map((c) => c.trim()).filter((c) => have.has(c)))];
+  return [...kept, ...current.filter((c) => !kept.includes(c))];
+}
+
 /** 값을 구분자로 n 조각까지 나눈다. 조각이 남으면 마지막 칸에 나머지를 그대로 붙인다 */
 function splitParts(value, sep, n) {
   const text = value == null ? '' : String(value);
@@ -407,4 +464,9 @@ function splitParts(value, sep, n) {
   const parts = sep ? text.split(sep) : [text];
   if (parts.length <= n) return parts;
   return [...parts.slice(0, n - 1), parts.slice(n - 1).join(sep)];
+}
+
+/** 함수 한 번으로: replaceText(bytes, { ptinfo: 'ptif' }) → 새 HWPX 바이트 */
+export function replaceText(bytes, map) {
+  return new HwpxDocument(bytes).replaceText(map).toBytes();
 }
