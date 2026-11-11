@@ -41,6 +41,21 @@ from hwpxpb import HwpxDocument, replace_text
 out = replace_text(data, {"ptinfo": "ptif"})
 ```
 
+## HWPX 를 일반 편집기로 고치기
+
+HWPX 는 XML 파일들을 묶은 ZIP 입니다. 아래 도구로 폴더에 풀어서 VS Code 등으로 고친 뒤 다시 묶습니다 (Node 필요, `npm ci` 한 번).
+
+```bash
+node scripts/hwpx-xml.mjs unpack 양식.hwpx          # → 양식.hwpx.d/ (본문: Contents/section0.xml)
+node scripts/hwpx-xml.mjs pack 양식.hwpx.d          # → 양식-edited.hwpx (원본은 그대로)
+```
+
+- 풀 때 XML 을 태그마다 줄 바꿔 들여 쓰고, 묶을 때 되돌립니다. 고치지 않고 다시 묶으면 원본과 같은 파일이 됩니다.
+  글자 요소(`<hp:t>`, `xml:space="preserve"`) 안의 공백·줄바꿈은 글자이므로 건드리지 않습니다. `--raw` 를 주면 줄 맞춤 없이 원본 그대로 풉니다.
+- 묶을 때 `mimetype` 을 맨 앞에 압축 없이 넣고, 나머지는 원래 순서를 따릅니다 (`.hwpx-xml.json` 에 기록, 지우지 마세요).
+- 글을 바꿔도 줄 배치 정보(`<hp:linesegarray>`)는 다시 계산되지 않습니다. 한글이 열 때 다시 맞춥니다.
+- 누름틀 안내문은 글자 수가 같이 적혀 있습니다 (`Direction:wstring:2:성명` 의 `2`). 안내문을 바꾸면 숫자도 맞춥니다.
+
 ## 개발
 
 ```bash

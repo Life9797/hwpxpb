@@ -16,7 +16,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from typing import Any, Iterator
+from typing import Any, Iterator, Optional
 
 SEP = "__"
 GROUP_SEP = "|"  # 누름틀 묶음 값의 기본 구분자
@@ -93,13 +93,16 @@ def iter_fields(xml: str) -> Iterator[dict]:
         if end_pos < 0:
             continue
         end = xml.rfind("<hp:ctrl>", 0, end_pos)
+        guide = guide_text(xml[m.start():block_end])
+        # 에디터(rhwp)는 직접 입력해도 dirty="0" 그대로 저장한다. 내용이 안내문과 다르면 입력된 값으로 본다
+        shown = content_text(xml[start:end]).strip()
         yield {
             "name": attr(tag, "name"),
             "id": int(fid) if (fid or "").isdigit() else 0,
             "tag": tag,
             "tag_start": m.start(),
-            "guide": guide_text(xml[m.start():block_end]),
-            "dirty": attr(tag, "dirty") == "1",
+            "guide": guide,
+            "dirty": attr(tag, "dirty") == "1" or (shown != "" and shown != guide),
             "start": start,
             "end": end,
         }
@@ -162,6 +165,23 @@ def not_hwpx_reason(data: bytes, err: Exception | None = None) -> str:
     if head.startswith("50 4b"):
         return f"HWPX 파일이 손상됐거나 덜 저장됐습니다 ({n}바이트{', ' + str(err) if err else ''}). 파일 쓰기가 끝난 뒤(닫은 뒤) 여세요"
     return f"HWPX(ZIP) 형식이 아닙니다 ({n}바이트, 앞부분 {head}). 문서보안(DRM) 암호화나 base64 오류일 수 있습니다"
+
+
+def match_column_case(values: dict, columns: list[str]) -> dict:
+    """값의 키를 문서 컬럼 이름에 맞춘다. 똑같은 이름이 없으면 대소문자를 무시하고 찾는다
+    (PB DataWindow 컬럼명은 소문자, 데모는 대문자로 보내는 등 대소문자가 어긋나기 쉽다).
+    대소문자만 다른 컬럼이 문서에 여럿이면 고르지 않는다."""
+    exact = set(columns)
+    by_upper: dict[str, Optional[str]] = {}
+    for c in columns:
+        k = c.upper()
+        by_upper[k] = None if k in by_upper else c
+    out: dict = {}
+    for k, v in (values or {}).items():
+        col = k if k in exact else (by_upper.get(str(k).upper()) or k)
+        if col not in out or col == k:
+            out[col] = v
+    return out
 
 
 class HwpxDocument:
@@ -438,6 +458,7 @@ class HwpxDocument:
 
     def fill(self, values: dict[str, Any], combo_sep: str = ":", group_sep: str = GROUP_SEP) -> dict:
         """DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 목록)"""
+        values = match_column_case(values, self.columns())
         items = self.schema()
         raw: dict[str, Any] = {}
         known: set[str] = set()

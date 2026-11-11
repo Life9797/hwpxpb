@@ -196,3 +196,13 @@ test('columns keep: 이전 순서 유지, 새 컬럼은 뒤에, 없어진 컬럼
   assert.deepEqual(d.columns('keep:' + prev), [...all.slice(1).reverse(), all[0]]);
   assert.deepEqual(d.columns('keep:'), all);
 });
+
+test('fill: 컬럼 이름은 대소문자를 가리지 않는다 (PB DW 컬럼명은 소문자)', () => {
+  const doc = new HwpxDocument(makeHwpx());
+  const r = doc.fill({ pt_nm: '홍길동', Agree_Yn: 'Y', sex_cd: 'F', no_such: 'x' });
+  assert.deepEqual(r.unknown, ['no_such']);
+  const v = doc.extract().values;
+  assert.equal(v.PT_NM, '홍길동');
+  assert.equal(v.AGREE_YN, 'Y');
+  assert.equal(v.SEX_CD, 'F');
+});

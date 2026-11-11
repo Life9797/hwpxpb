@@ -50,6 +50,20 @@ class EngineTest(unittest.TestCase):
             {"PT_NM": "", "RESULT": "정상", "MEMO": "", "AGREE_YN": "N", "ITEM_CD": "", "SEX_CD": "M", "REGION_CD": ""},
         )
 
+    def test_extract_typed_without_dirty(self):
+        # rhwp 는 입력해도 dirty 를 안 바꾸고 안내문 자리에 값을 쓴다
+        src = entries(make_hwpx())
+        sec = src["Contents/section0.xml"].decode("utf-8").replace("<hp:t> 성명</hp:t>", "<hp:t>KIM</hp:t>")
+        self.assertIn("KIM", sec)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            for name, data in src.items():
+                zf.writestr(name, sec.encode("utf-8") if name == "Contents/section0.xml" else data)
+        doc = HwpxDocument(buf.getvalue())
+        values = doc.extract()["values"]
+        self.assertEqual(values["PT_NM"], "KIM")
+        self.assertEqual(values["MEMO"], "")
+
     def test_fill_extract_roundtrip(self):
         doc = open_doc()
         res = doc.fill(
@@ -80,6 +94,13 @@ class EngineTest(unittest.TestCase):
                 "REGION_CD": "02",
             },
         )
+
+    def test_fill_ignores_column_case(self):
+        doc = open_doc()
+        r = doc.fill({"pt_nm": "홍길동", "Agree_Yn": "Y", "sex_cd": "F", "no_such": "x"})
+        self.assertEqual(r["unknown"], ["no_such"])
+        v = doc.extract()["values"]
+        self.assertEqual((v["PT_NM"], v["AGREE_YN"], v["SEX_CD"]), ("홍길동", "Y", "F"))
 
     def test_rejected(self):
         doc = open_doc()
