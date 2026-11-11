@@ -230,7 +230,12 @@ namespace Hwpxpb
                 // 설치 폴더에 webview2\ (고정 버전 런타임)가 있으면 그것을 쓴다. 없으면 PC 에 설치된 런타임
                 var fixedRuntime = Path.Combine(baseDir, "webview2");
                 var browserDir = File.Exists(Path.Combine(fixedRuntime, "msedgewebview2.exe")) ? fixedRuntime : null;
-                var env = await CoreWebView2Environment.CreateAsync(browserDir, dataDir);
+                // C++ 판과 같은 브라우저 인자. CalculateNativeWinOcclusion 을 끄는 이유: 창이 가려졌다고 판단하면
+                // 그리기를 멈추는데, PB 디버거가 앱 창을 덮거나 멈춘 동안 그렇게 잡혀 다시 보여도 화면이 비는 일이 있다
+                var options = new CoreWebView2EnvironmentOptions(
+                    "--disable-features=msSmartScreenProtection,CalculateNativeWinOcclusion " +
+                    "--disable-background-networking --disable-component-update --no-first-run");
+                var env = await CoreWebView2Environment.CreateAsync(browserDir, dataDir, options);
                 await _web.EnsureCoreWebView2Async(env);
                 var folder = WebFolder;
                 if (string.IsNullOrEmpty(folder))

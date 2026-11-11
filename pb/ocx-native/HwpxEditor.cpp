@@ -222,6 +222,11 @@ class CHwpxEditor;
 
 namespace {
 
+// WebView2 브라우저 인자 (아래 환경 만들기에서 설명). --disable-features 는 한 번만 써야 한다 (뒤의 것만 적용됨)
+const wchar_t* const kBrowserArgs =
+	L"--disable-features=msSmartScreenProtection,CalculateNativeWinOcclusion "
+	L"--disable-background-networking --disable-component-update --no-first-run";
+
 struct View {
 	enum State { Starting, InUse, Resetting, Parked };
 	CComPtr<ICoreWebView2Environment> env;
@@ -424,10 +429,11 @@ void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstr
 		for (auto& f : waiting) f(hr, env);
 	};
 
-	// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등)
+	// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등).
+	// CalculateNativeWinOcclusion: 창이 가려졌다고 판단하면 그리기를 멈추는 기능. PB 디버거가 앱 창을 덮거나
+	// 멈춘 동안 가려짐으로 잡히고, 다시 보여도 풀리지 않아 화면이 비는 일이 있어 끈다.
 	auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
-	options->put_AdditionalBrowserArguments(
-		L"--disable-features=msSmartScreenProtection --disable-background-networking --disable-component-update --no-first-run");
+	options->put_AdditionalBrowserArguments(kBrowserArgs);
 
 	HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixedDir.c_str() : nullptr, dataDir.c_str(), options.Get(),
 		Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
