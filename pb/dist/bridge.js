@@ -401,16 +401,25 @@ const api = {
   /** 문서 열기. b64 = HWPX 파일 내용, mode = form | edit | view */
   async open(b64, fileName = 'document.hwpx', mode = 'form') {
     checkMode(mode);
-    state.template = fromB64(b64);
-    state.fileName = fileName;
-    state.closed = false;
-    state.mode = mode;
-    new HwpxDocument(state.template); // HWPX 인지 먼저 확인
-    await load(state.template);
+    let bytes;
+    try {
+      bytes = fromB64(String(b64 ?? '').replace(/\s+/g, ''));
+    } catch {
+      throw new Error('HWPX 파일이 아닙니다: base64 형식이 잘못됐습니다 (잘렸거나 파일 내용이 아닌 값)');
+    }
+    // 상태를 바꾸기 전에 HWPX 인지 확인한다. 실패해도 보던 문서·상태는 그대로라 다음 호출이 계속 된다
+    const doc = new HwpxDocument(bytes);
+    const prev = { template: state.template, fileName: state.fileName, closed: state.closed, mode: state.mode };
+    Object.assign(state, { template: bytes, fileName, closed: false, mode });
+    try {
+      await load(bytes);
+    } catch (e) {
+      Object.assign(state, prev); // 에디터가 못 연 문서를 양식으로 남기지 않는다
+      throw e;
+    }
     state.userEdited = false;
     await applyChrome();
     await autoFit();
-    const doc = new HwpxDocument(state.template);
     emit('loaded', { fileName, table: doc.dbTable });
     return { ok: true, table: doc.dbTable };
   },

@@ -147,13 +147,33 @@ def _apply_edits(xml: str, edits: list[tuple[int, int, str]]) -> str:
 
 
 # ---- 문서 ----------------------------------------------------------------
+def keep_order(current: list[str], prev: str) -> list[str]:
+    """이전 순서를 지키고 새 컬럼은 뒤에 (JS keepOrder 와 같음)"""
+    have = set(current)
+    kept = list(dict.fromkeys(c.strip() for c in re.split(r"[\t,\r\n]+", prev) if c.strip() in have))
+    return kept + [c for c in current if c not in kept]
+
+
+def not_hwpx_reason(data: bytes, err: Exception | None = None) -> str:
+    """ZIP 으로 못 여는 이유 (JS 엔진 notHwpxReason 과 같은 문구)"""
+    n = len(data)
+    head = " ".join(f"{b:02x}" for b in data[:4])
+    if n == 0:
+        return "HWPX 파일이 아닙니다: 내용이 비어 있습니다 (0바이트)"
+    if head == "d0 cf 11 e0":
+        return "HWPX 파일이 아닙니다: HWP(바이너리) 파일입니다. 한글에서 HWPX 로 저장해 쓰세요"
+    if head.startswith("50 4b"):
+        return f"HWPX 파일이 손상됐거나 덜 저장됐습니다 ({n}바이트{', ' + str(err) if err else ''}). 파일 쓰기가 끝난 뒤(닫은 뒤) 여세요"
+    return f"HWPX(ZIP) 형식이 아닙니다 ({n}바이트, 앞부분 {head}). 문서보안(DRM) 암호화나 base64 오류일 수 있습니다"
+
+
 class HwpxDocument:
     def __init__(self, data: bytes):
         try:
             zf = zipfile.ZipFile(io.BytesIO(bytes(data)))
             self.entries: dict[str, bytes] = {i.filename: zf.read(i) for i in zf.infolist()}
-        except (zipfile.BadZipFile, ValueError) as e:
-            raise ValueError(f"HWPX 파일이 아닙니다 ({e})") from e
+        except (zipfile.BadZipFile, ValueError, EOFError, OSError) as e:
+            raise ValueError(not_hwpx_reason(bytes(data), e)) from e
         if "mimetype" not in self.entries:
             raise ValueError("HWPX 파일이 아닙니다 (mimetype 없음)")
         self.sections = sorted(n for n in self.entries if SECTION_RE.match(n))
@@ -175,6 +195,52 @@ class HwpxDocument:
                 else:
                     zf.writestr(name, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=6)
         return buf.getvalue()
+
+    def replace_text(self, mapping: dict) -> "HwpxDocument":
+        """XML 원문 일괄 치환. 모든 .xml/.hpf 엔트리에서 글자를 바꾼다.
+        예: doc.replace_text({"ptinfo": "ptif"}).to_bytes()
+        키는 긴 것부터 한 번에 바꾸고(연쇄 치환 없음), `wstring:길이:값` 안에서 바뀌면 길이도 고친다.
+        값은 XML 원문에 그대로 들어간다. 바꾼 개수는 self.replaced 에 남는다."""
+        keys = sorted((k for k in mapping if k != ""), key=len, reverse=True)
+        self.replaced = 0
+        if not keys:
+            return self
+        pat = re.compile("|".join(re.escape(k) for k in keys))
+
+        def sub(t: str) -> str:
+            def one(m):
+                self.replaced += 1
+                return str(mapping[m.group(0)])
+            return pat.sub(one, t)
+
+        def u16(t: str) -> int:  # 길이 표기는 UTF-16 글자 수 (JS 엔진과 같음)
+            return len(t.encode("utf-16-le", "surrogatepass")) // 2
+
+        def take(t: str, start: int, n: int) -> int:  # start 부터 UTF-16 n 단위 끝 위치
+            i = start
+            while n > 0 and i < len(t):
+                n -= 2 if ord(t[i]) > 0xFFFF else 1
+                i += 1
+            return i
+
+        for name in list(self.entries):
+            if not re.search(r"\.(xml|hpf)$", name, re.I):
+                continue
+            xml = self.xml(name)
+            if not any(k in xml for k in keys):
+                continue
+            out, i = [], 0
+            ws = re.compile(r"wstring:(\d+):")
+            pos = 0
+            while (m := ws.search(xml, pos)):
+                vs = m.end()
+                ve = take(xml, vs, int(m.group(1)))
+                val = sub(xml[vs:ve])
+                out.append(sub(xml[i:m.start()]) + f"wstring:{u16(val)}:" + val)
+                i = pos = ve
+            out.append(sub(xml[i:]))
+            self._set_xml(name, "".join(out))
+        return self
 
     @property
     def db_table(self) -> str | None:
@@ -209,7 +275,10 @@ class HwpxDocument:
         return out
 
     def columns(self, order: str = "document") -> list[str]:
-        """DB 컬럼 이름 목록. order="created" 면 넣은 순서: 누름틀(id 순) 다음 양식 개체(tabOrder 순)"""
+        """DB 컬럼 이름 목록. order="created" 면 넣은 순서: 누름틀(id 순) 다음 양식 개체(tabOrder 순).
+        order="keep:이전목록"(탭·쉼표) 이면 이전 순서를 지키고 새 컬럼만 뒤에 붙인다 (없어진 컬럼은 빠짐)."""
+        if str(order).startswith("keep:"):
+            return keep_order(self.columns("created"), str(order)[5:])
         if order != "created":
             return list(self.extract()["values"].keys())
         items = sorted(enumerate(self.schema()), key=lambda p: (p[1]["type"] != "clickhere", p[1]["order"], p[0]))
@@ -425,3 +494,8 @@ class HwpxDocument:
             "unknown": sorted(k for k in keys if k not in known),
             "rejected": sorted(k for k in keys if k in known and k not in applied_cols),
         }
+
+
+def replace_text(data: bytes, mapping: dict) -> bytes:
+    """함수 한 번으로: replace_text(data, {"ptinfo": "ptif"}) → 새 HWPX 바이트"""
+    return HwpxDocument(data).replace_text(mapping).to_bytes()

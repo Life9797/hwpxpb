@@ -166,3 +166,39 @@ class EngineTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplaceTextTest(unittest.TestCase):
+    def test_replace_text(self):
+        from hwpxpb import replace_text
+        doc = HwpxDocument(make_hwpx())
+        doc._set_xml("Contents/section0.xml", doc.xml("Contents/section0.xml") + '<x a="ptinfo">Name:wstring:9:ptinfo_nm z</x>')
+        doc.replace_text({"ptinfo": "ptif", "": "x"})
+        xml = doc.xml("Contents/section0.xml")
+        self.assertNotIn("ptinfo", xml)
+        self.assertIn('<x a="ptif">Name:wstring:7:ptif_nm z</x>', xml)
+        self.assertEqual(doc.replaced, 2)
+        out = HwpxDocument(replace_text(doc.to_bytes(), {"ptif": "홍"}))
+        self.assertIn("Name:wstring:4:홍_nm z", out.xml("Contents/section0.xml"))
+        self.assertEqual(out.extract()["values"]["RESULT"], "정상")
+
+
+class NotHwpxTest(unittest.TestCase):
+    def test_reasons(self):
+        def msg(b):
+            with self.assertRaises(ValueError) as c:
+                HwpxDocument(b)
+            return str(c.exception)
+        self.assertIn("비어 있습니다", msg(b""))
+        self.assertIn("HWP(바이너리)", msg(b"\xd0\xcf\x11\xe0\x01"))
+        self.assertIn("손상됐거나 덜 저장", msg(make_hwpx()[:100]))
+        self.assertIn("DRM", msg(b"\x01\x02\x03\x04\x05"))
+
+
+class KeepOrderTest(unittest.TestCase):
+    def test_keep(self):
+        d = HwpxDocument(make_hwpx())
+        allc = d.columns("created")
+        prev = "\t".join(["GONE", *reversed(allc[1:])])
+        self.assertEqual(d.columns("keep:" + prev), [*reversed(allc[1:]), allc[0]])
+        self.assertEqual(d.columns("keep:"), allc)

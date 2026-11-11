@@ -260,19 +260,26 @@ Return ll_set
 end function
 
 public function integer wf_make_dw ();// 연 양식의 개체 이름으로 DW(자유형, 외부 데이터)를 만든다. 실제 업무에서는 DB 테이블 DW 를 쓰면 된다
-string ls_tsv, ls_line, ls_col, ls_table, ls_objs, ls_syn, ls_err
-long ll_pos, ll_tab, ll_n, ll_y
+string ls_cols, ls_col, ls_table, ls_objs, ls_syn, ls_err, ls_ini, ls_key, ls_prev, ls_save
+long ll_pos, ll_n, ll_y
 
 If Not wf_check() Then Return -1
-ls_tsv = String(iole.object.GetFieldsTsv(is_sep))
-Do While Len(ls_tsv) > 0
-	ll_pos = Pos(ls_tsv, "~r~n")
-	If ll_pos = 0 Then ll_pos = Len(ls_tsv) + 1
-	ls_line = Left(ls_tsv, ll_pos - 1)
-	ls_tsv = Mid(ls_tsv, ll_pos + 2)
-	ll_tab = Pos(ls_line, "~t")
-	If ll_tab > 0 Then
-		ls_col = Lower(Left(ls_line, ll_tab - 1))
+// 컬럼 순서 고정: 지난번 목록(INI)을 넘기면 그 순서를 지키고 새 개체만 맨 뒤에 붙는다
+// (양식 중간에 누름틀을 넣어도 기존 컬럼 위치가 밀리지 않는다). 처음이면 개체를 넣은 순서
+ls_ini = GetCurrentDirectory() + "\hwpx_dw.ini"
+ls_key = String(iole.object.GetTable())
+If ls_key = "" Then ls_key = "NOTABLE"
+ls_prev = ProfileString(ls_ini, "columns", ls_key, "")
+ls_cols = String(iole.object.GetColumns("keep:" + ls_prev))
+Do While Len(ls_cols) > 0
+	ll_pos = Pos(ls_cols, "~t")
+	If ll_pos = 0 Then ll_pos = Len(ls_cols) + 1
+	ls_col = Left(ls_cols, ll_pos - 1)
+	ls_cols = Mid(ls_cols, ll_pos + 1)
+	If ls_col <> "" Then
+		If ls_save <> "" Then ls_save += ","
+		ls_save += ls_col
+		ls_col = Lower(ls_col)
 		ll_n++
 		ll_y = 16 + (ll_n - 1) * 88
 		ls_table += 'column=(type=char(4000) updatewhereclause=yes name=' + ls_col + ' dbname="' + ls_col + '") '
@@ -296,6 +303,7 @@ If dw_1.Create(ls_syn, ls_err) <> 1 Then
 	MessageBox("DW 만들기 실패", ls_err)
 	Return -1
 End If
+SetProfileString(ls_ini, "columns", ls_key, ls_save)
 dw_1.InsertRow(0)
 st_status.Text = "DW 만듦: 컬럼 " + String(ll_n) + "개"
 Return ll_n
