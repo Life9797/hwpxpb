@@ -120,6 +120,26 @@ export function notHwpxReason(u8, err) {
 }
 
 // ---- 문서 열기/저장 --------------------------------------------------------
+/**
+ * 값의 키를 문서 컬럼 이름에 맞춘다. 똑같은 이름이 없으면 대소문자를 무시하고 찾는다
+ * (PB DataWindow 컬럼명은 소문자, 데모는 대문자로 보내는 등 대소문자가 어긋나기 쉽다).
+ * 대소문자만 다른 컬럼이 문서에 여럿이면 고르지 않는다.
+ */
+function matchColumnCase(values, columns) {
+  const exact = new Set(columns);
+  const byUpper = new Map();
+  for (const c of columns) {
+    const k = c.toUpperCase();
+    byUpper.set(k, byUpper.has(k) ? null : c);
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(values ?? {})) {
+    const col = exact.has(k) ? k : (byUpper.get(String(k).toUpperCase()) ?? k);
+    if (!(col in out) || col === k) out[col] = v;
+  }
+  return out;
+}
+
 export class HwpxDocument {
   /** @param {Uint8Array|ArrayBuffer} bytes */
   constructor(bytes) {
@@ -393,6 +413,7 @@ export class HwpxDocument {
 
   /** DB 컬럼 기준 대입. 반환: {applied, unknown, rejected} (모두 컬럼명 배열) */
   fill(values, { comboSep = ':', groupSep = GROUP_SEP } = {}) {
+    values = matchColumnCase(values, this.columns());
     const items = this.schema();
     const raw = {};
     const known = new Set();

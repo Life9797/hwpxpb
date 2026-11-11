@@ -95,6 +95,13 @@ class EngineTest(unittest.TestCase):
             },
         )
 
+    def test_fill_ignores_column_case(self):
+        doc = open_doc()
+        r = doc.fill({"pt_nm": "홍길동", "Agree_Yn": "Y", "sex_cd": "F", "no_such": "x"})
+        self.assertEqual(r["unknown"], ["no_such"])
+        v = doc.extract()["values"]
+        self.assertEqual((v["PT_NM"], v["AGREE_YN"], v["SEX_CD"]), ("홍길동", "Y", "F"))
+
     def test_rejected(self):
         doc = open_doc()
         res = doc.fill({"REGION_CD": "99", "SEX_CD": "X"})
