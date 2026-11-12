@@ -77,6 +77,9 @@ namespace Hwpxpb
         [DispId(49)] bool GetShortcutLockModes();
         // 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
         [DispId(50)] bool RecoveryEnabled { get; set; }
+        // 창 가림 감지 (기본 true). PC 에 저장, 다음 실행부터 적용. 디버거로 멈출 때 화면이 비면 false
+        [DispId(51)] bool SetOcclusionDetection(bool on);
+        [DispId(52)] bool GetOcclusionDetection();
         // Windows 프린터 선택 창. 고른 프린터 이름 (취소하면 "")
         [DispId(39)] string SelectPrinter();
         // 프린터 선택 창에서 프린터·매수를 고른 뒤 바로 인쇄. 취소하면 false
@@ -230,7 +233,8 @@ namespace Hwpxpb
                 // 설치 폴더에 webview2\ (고정 버전 런타임)가 있으면 그것을 쓴다. 없으면 PC 에 설치된 런타임
                 var fixedRuntime = Path.Combine(baseDir, "webview2");
                 var browserDir = File.Exists(Path.Combine(fixedRuntime, "msedgewebview2.exe")) ? fixedRuntime : null;
-                var env = await CoreWebView2Environment.CreateAsync(browserDir, dataDir);
+                var options = new CoreWebView2EnvironmentOptions(BrowserArgs());
+                var env = await CoreWebView2Environment.CreateAsync(browserDir, dataDir, options);
                 await _web.EnsureCoreWebView2Async(env);
                 var folder = WebFolder;
                 if (string.IsNullOrEmpty(folder))
@@ -444,6 +448,51 @@ namespace Hwpxpb
         }
 
         public bool GetShortcutLockModes() => _shortcutLock;
+
+        private const string SettingsKey = @"Software\hwpxpb";
+        private const string OcclusionValue = "OcclusionDetection";
+
+        /// <summary>
+        /// 창 가림 감지 켜기/끄기 (기본 켜짐). PC 에 저장되고, 브라우저 인자라서 다음 실행부터 적용된다.
+        /// 디버거로 멈추거나 한 줄씩 진행할 때 화면이 비면 끈다.
+        /// </summary>
+        public bool SetOcclusionDetection(bool on)
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.CreateSubKey(SettingsKey)) k.SetValue(OcclusionValue, on ? 1 : 0, RegistryValueKind.DWord);
+                return true;
+            }
+            catch (Exception e)
+            {
+                return Fail("설정을 저장하지 못했습니다: " + e.Message);
+            }
+        }
+
+        public bool GetOcclusionDetection() => OcclusionDetectionSetting();
+
+        private static bool OcclusionDetectionSetting()
+        {
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(SettingsKey))
+                    return !(k?.GetValue(OcclusionValue) is int v) || v != 0;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// C++ 판과 같은 브라우저 인자. --disable-features 는 한 번만 (뒤의 것만 적용됨).
+        /// CalculateNativeWinOcclusion: 창이 가려졌다고 판단하면 그리기를 멈추는 기능. 설정으로 끌 수 있다.
+        /// </summary>
+        private static string BrowserArgs()
+        {
+            var features = "msSmartScreenProtection" + (OcclusionDetectionSetting() ? "" : ",CalculateNativeWinOcclusion");
+            return "--disable-features=" + features + " --disable-background-networking --disable-component-update --no-first-run";
+        }
 
         public string SelectPrinter()
         {
