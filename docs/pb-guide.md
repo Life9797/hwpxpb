@@ -86,7 +86,7 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `SaveAs(path, comboSep)` | HWPX 로 저장. form 모드에서는 원본 양식에 값만 다시 넣어 저장하므로 서식이 바뀌지 않음 |
 | `SavePdf(path)` | PDF 로 저장 |
 | `Print()` | 인쇄 대화상자(미리보기)를 띄움. 프린터·매수·쪽 범위는 사용자가 고름 |
-| `PrintTo(printerName, copies)` | 대화상자 없이 바로 인쇄. `printerName` 이 `""` 이면 기본 프린터 |
+| `PrintTo(printerName, copies)` | 대화상자 없이 바로 인쇄. `printerName` 이 `""` 이거나, 이 PC 에 없는 프린터이거나, 쓸 수 없는(오프라인 등) 프린터면 Windows 기본 프린터로 인쇄 |
 | `SelectPrinter()` | Windows 프린터 선택 창을 띄워 고른 프린터 이름을 돌려줌. 취소하면 `""`. 고른 이름을 `PrintTo` 에 넘김 |
 | `PrintDialog()` | 프린터 선택 창에서 프린터·매수를 고르게 한 뒤 바로 인쇄. 취소하면 false (`LastError` 는 빈 문자열) |
 | `GetPrinters()` | 설치된 프린터 이름 (줄마다 하나) |

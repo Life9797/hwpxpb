@@ -589,24 +589,43 @@ namespace Hwpxpb
             catch (Exception ex) { return Fail(ex.Message); }
         }
 
-        /// <summary>대화상자 없이 바로 인쇄. printerName 이 빈 문자열이면 기본 프린터.</summary>
+        /// <summary>
+        /// 대화상자 없이 바로 인쇄. printerName 이 "" 이거나, 이 PC 에 없는 프린터이거나, 쓸 수 없는 프린터면
+        /// Windows 기본 프린터로 인쇄한다.
+        /// </summary>
         public bool PrintTo(string printerName, int copies)
         {
             if (!Ok(Call("preparePrint"))) return false;
             try
             {
-                var settings = NewPrintSettings();
-                if (!string.IsNullOrEmpty(printerName)) settings.PrinterName = printerName;
-                settings.Copies = copies < 1 ? 1 : copies;
-                var status = Wait(_web.CoreWebView2.PrintAsync(settings));
+                var printer = printerName ?? "";
+                if (printer != "" && !PrinterInstalled(printer)) printer = ""; // 없는 프린터 → 기본 프린터
+                var status = PrintOnce(printer, copies);
+                if (status == CoreWebView2PrintStatus.PrinterUnavailable && printer != "")
+                    status = PrintOnce("", copies); // 설치는 됐지만 쓸 수 없는 프린터 → 기본 프린터로 한 번 더
                 switch (status)
                 {
                     case CoreWebView2PrintStatus.Succeeded: return true;
-                    case CoreWebView2PrintStatus.PrinterUnavailable: return Fail("프린터를 쓸 수 없습니다: " + printerName);
+                    case CoreWebView2PrintStatus.PrinterUnavailable: return Fail("기본 프린터를 쓸 수 없습니다");
                     default: return Fail("인쇄 실패");
                 }
             }
             catch (Exception ex) { return Fail(ex.Message); }
+        }
+
+        private CoreWebView2PrintStatus PrintOnce(string printer, int copies)
+        {
+            var settings = NewPrintSettings();
+            if (!string.IsNullOrEmpty(printer)) settings.PrinterName = printer;
+            settings.Copies = copies < 1 ? 1 : copies;
+            return Wait(_web.CoreWebView2.PrintAsync(settings));
+        }
+
+        private static bool PrinterInstalled(string name)
+        {
+            foreach (string n in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
+                if (string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
         }
 
         /// <summary>설치된 프린터 이름 (줄바꿈으로 구분)</summary>
