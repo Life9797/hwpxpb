@@ -881,19 +881,43 @@ public:
 	}
 
 	/** 대화상자 없이 바로 인쇄. printerName 이 빈 문자열이면 기본 프린터 */
+	/**
+	 * 대화상자 없이 바로 인쇄. printerName 이 "" 이거나, 이 PC 에 없는 프린터이거나, 쓸 수 없는 프린터면
+	 * Windows 기본 프린터로 인쇄한다.
+	 */
 	STDMETHOD(PrintTo)(BSTR printerName, long copies, VARIANT_BOOL* result) {
 		if (!Call(L"preparePrint", {}).ok) return Ret(result, false);
 		CComQIPtr<ICoreWebView2_16> w16(m_web);
-		CComPtr<ICoreWebView2PrintSettings> settings;
-		if (!w16 || !NewPrintSettings(settings)) return Ret(result, Fail(L"이 WebView2 런타임은 바로 인쇄를 지원하지 않습니다 (109 이상 필요)"));
+		CComPtr<ICoreWebView2PrintSettings> probe;
+		if (!w16 || !NewPrintSettings(probe)) return Ret(result, Fail(L"이 WebView2 런타임은 바로 인쇄를 지원하지 않습니다 (109 이상 필요)"));
 		std::wstring printer = Str(printerName);
+		if (!printer.empty() && !PrinterInstalled(printer)) printer.clear();  // 없는 프린터 → 기본 프린터
+		HRESULT code = S_OK;
+		COREWEBVIEW2_PRINT_STATUS status = PrintOnce(w16, printer, copies, code);
+		if (status == COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE && !printer.empty()) {
+			printer.clear();  // 설치는 됐지만 쓸 수 없는 프린터 → 기본 프린터로 한 번 더
+			status = PrintOnce(w16, printer, copies, code);
+		}
+		if (SUCCEEDED(code) && status == COREWEBVIEW2_PRINT_STATUS_SUCCEEDED) return Ret(result, true);
+		if (status == COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE) return Ret(result, Fail(L"기본 프린터를 쓸 수 없습니다"));
+		if (FAILED(code) && code != E_ABORT) return Ret(result, Fail(L"인쇄 실패" + HrText(code)));
+		return Ret(result, Fail(L"인쇄 실패"));
+	}
+
+	/** 한 번 인쇄해 결과 상태를 돌려준다. printer 가 "" 이면 기본 프린터. 시작 실패·시간 초과는 code 에 */
+	COREWEBVIEW2_PRINT_STATUS PrintOnce(ICoreWebView2_16* w16, const std::wstring& printer, long copies, HRESULT& code) {
+		code = S_OK;
+		CComPtr<ICoreWebView2PrintSettings> settings;
+		if (!NewPrintSettings(settings)) {
+			code = E_FAIL;
+			return COREWEBVIEW2_PRINT_STATUS_OTHER_ERROR;
+		}
 		CComQIPtr<ICoreWebView2PrintSettings2> s2(settings);
 		if (s2) {
 			if (!printer.empty()) s2->put_PrinterName(printer.c_str());
 			s2->put_Copies(copies < 1 ? 1 : copies);
 		}
 		bool done = false;
-		HRESULT code = S_OK;
 		COREWEBVIEW2_PRINT_STATUS status = COREWEBVIEW2_PRINT_STATUS_OTHER_ERROR;
 		HRESULT hr = w16->Print(settings,
 			Callback<ICoreWebView2PrintCompletedHandler>([&](HRESULT c, COREWEBVIEW2_PRINT_STATUS s) -> HRESULT {
@@ -902,11 +926,36 @@ public:
 				done = true;
 				return S_OK;
 			}).Get());
-		if (FAILED(hr)) return Ret(result, Fail(L"인쇄 실패" + HrText(hr)));
-		if (!Wait([&done] { return done; })) return Ret(result, Fail(L"인쇄 시간 초과"));
-		if (SUCCEEDED(code) && status == COREWEBVIEW2_PRINT_STATUS_SUCCEEDED) return Ret(result, true);
-		if (status == COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE) return Ret(result, Fail(L"프린터를 쓸 수 없습니다: " + printer));
-		return Ret(result, Fail(L"인쇄 실패" + HrText(code)));
+		if (FAILED(hr)) {
+			code = hr;
+			return COREWEBVIEW2_PRINT_STATUS_OTHER_ERROR;
+		}
+		if (!Wait([&done] { return done; })) {
+			code = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+			return COREWEBVIEW2_PRINT_STATUS_OTHER_ERROR;
+		}
+		return status;
+	}
+
+	/** 설치된 프린터 이름 목록 (로컬 + 네트워크 연결) */
+	static std::vector<std::wstring> PrinterNames() {
+		std::vector<std::wstring> names;
+		DWORD needed = 0, count = 0;
+		const DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+		EnumPrintersW(flags, nullptr, 4, nullptr, 0, &needed, &count);
+		if (!needed) return names;
+		std::vector<BYTE> buf(needed);
+		if (EnumPrintersW(flags, nullptr, 4, buf.data(), needed, &needed, &count)) {
+			auto* info = reinterpret_cast<PRINTER_INFO_4W*>(buf.data());
+			for (DWORD i = 0; i < count; i++) names.push_back(info[i].pPrinterName ? info[i].pPrinterName : L"");
+		}
+		return names;
+	}
+
+	static bool PrinterInstalled(const std::wstring& name) {
+		for (auto& n : PrinterNames())
+			if (_wcsicmp(n.c_str(), name.c_str()) == 0) return true;
+		return false;
 	}
 
 	/** Windows 프린터 선택 창. 고른 프린터 이름을 돌려준다 (취소하면 "") */
@@ -928,17 +977,10 @@ public:
 
 	/** 설치된 프린터 이름 (줄바꿈으로 구분) */
 	STDMETHOD(GetPrinters)(BSTR* result) {
-		DWORD needed = 0, count = 0;
-		const DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
-		EnumPrintersW(flags, nullptr, 4, nullptr, 0, &needed, &count);
-		std::vector<BYTE> buf(needed ? needed : 1);
 		std::wstring names;
-		if (needed && EnumPrintersW(flags, nullptr, 4, buf.data(), needed, &needed, &count)) {
-			auto* info = reinterpret_cast<PRINTER_INFO_4W*>(buf.data());
-			for (DWORD i = 0; i < count; i++) {
-				if (!names.empty()) names += L"\n";
-				names += info[i].pPrinterName ? info[i].pPrinterName : L"";
-			}
+		for (auto& n : PrinterNames()) {
+			if (!names.empty()) names += L"\n";
+			names += n;
 		}
 		return Ret(result, names);
 	}
