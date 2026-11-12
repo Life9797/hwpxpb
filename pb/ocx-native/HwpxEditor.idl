@@ -75,6 +75,9 @@ interface IHwpxEditor : IDispatch
 	// 복구용 자동 저장 (기본 true). PC 에 저장되어 다음 실행에도 쓰인다
 	[id(50), propget] HRESULT RecoveryEnabled([out, retval] VARIANT_BOOL* value);
 	[id(50), propput] HRESULT RecoveryEnabled([in] VARIANT_BOOL value);
+	// 창 가림 감지 (기본 true). PC 에 저장, 다음 실행부터 적용. 디버거로 멈출 때 화면이 비면 false
+	[id(51)] HRESULT SetOcclusionDetection([in] VARIANT_BOOL on, [out, retval] VARIANT_BOOL* result);
+	[id(52)] HRESULT GetOcclusionDetection([out, retval] VARIANT_BOOL* result);
 };
 
 [

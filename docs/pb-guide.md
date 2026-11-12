@@ -71,6 +71,8 @@ OCX 는 두 가지가 있습니다. ProgID(`Hwpxpb.Editor`)·메서드·이벤�
 | `AutoFit` (속성) | `true` 면 문서를 열거나 값 대입·모드·창 크기가 바뀔 때, 쪽을 넘겨 여백이 다른 구역에 왔을 때마다 `FitWidth`. 기본 `false` |
 | `SetShortcutLockModes(on, allow)` | 에디터 단축키 잠금 켜기/끄기. 모든 모드(작성·편집·보기)에 적용. `allow` = 잠금 중에도 허용할 키 (예: `"Ctrl+C,Ctrl+V"`, 빼면 없음) (아래 11절) |
 | `GetShortcutLockModes()` | 단축키 잠금 상태 |
+| `SetOcclusionDetection(on)` | 창 가림 감지 켜기/끄기 (기본 켜짐). PC 에 저장되고 **다음 실행부터** 적용. PB 디버거로 멈추거나 한 줄씩 진행할 때 에디터 화면이 비면 `False` 로 |
+| `GetOcclusionDetection()` | 저장된 창 가림 감지 설정 |
 | `RecoveryEnabled` (속성) | 복구용 자동 저장. 기본 `true`. 값은 PC 에 저장되어 다음 실행에도 쓰임 (아래 12절) |
 | `OpenBase64(b64, fileName, mode)` | DB BLOB 등에서 읽은 내용을 base64 로 열기 |
 | `SetFieldValue(column, value, comboSep)` | 값 하나 넣기. 성공하면 true |

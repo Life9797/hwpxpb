@@ -222,10 +222,31 @@ class CHwpxEditor;
 
 namespace {
 
-// WebView2 브라우저 인자 (아래 환경 만들기에서 설명). --disable-features 는 한 번만 써야 한다 (뒤의 것만 적용됨)
-const wchar_t* const kBrowserArgs =
-	L"--disable-features=msSmartScreenProtection,CalculateNativeWinOcclusion "
-	L"--disable-background-networking --disable-component-update --no-first-run";
+// PC 에 저장하는 설정 (HKCU\Software\hwpxpb)
+const wchar_t* const kSettingsKey = L"Software\\hwpxpb";
+const wchar_t* const kOcclusionValue = L"OcclusionDetection";
+
+/** 창 가림 감지 설정. 기본 켜짐(1). SetOcclusionDetection 으로 바꾼다 */
+bool OcclusionDetectionSetting() {
+	CRegKey key;
+	DWORD v = 1;
+	if (key.Open(HKEY_CURRENT_USER, kSettingsKey, KEY_READ) == ERROR_SUCCESS) {
+		DWORD read = 1;
+		if (key.QueryDWORDValue(kOcclusionValue, read) == ERROR_SUCCESS) v = read;
+	}
+	return v != 0;
+}
+
+/**
+ * WebView2 브라우저 인자 (아래 환경 만들기에서 설명). --disable-features 는 한 번만 써야 한다 (뒤의 것만 적용됨).
+ * CalculateNativeWinOcclusion: 창이 가려졌다고 판단하면 그리기를 멈추는 기능. PB 디버거로 멈추거나 한 줄씩 진행할 때
+ * 가려짐으로 잡혀 다시 보여도 화면이 비는 일이 있다. 설정(SetOcclusionDetection(false))으로 끌 수 있다.
+ */
+std::wstring BrowserArgs() {
+	std::wstring features = L"msSmartScreenProtection";
+	if (!OcclusionDetectionSetting()) features += L",CalculateNativeWinOcclusion";
+	return L"--disable-features=" + features + L" --disable-background-networking --disable-component-update --no-first-run";
+}
 
 struct View {
 	enum State { Starting, InUse, Resetting, Parked };
@@ -430,10 +451,9 @@ void GetEnvironment(const std::wstring& fixedDir, bool useFixed, const std::wstr
 	};
 
 	// 폐쇄망·느린 PC 에서 시작을 늦추는 백그라운드 네트워크 기능은 끈다 (평판 검사, 구성요소 업데이트 등).
-	// CalculateNativeWinOcclusion: 창이 가려졌다고 판단하면 그리기를 멈추는 기능. PB 디버거가 앱 창을 덮거나
-	// 멈춘 동안 가려짐으로 잡히고, 다시 보여도 풀리지 않아 화면이 비는 일이 있어 끈다.
+	// 창 가림 감지는 설정에 따른다 (BrowserArgs)
 	auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
-	options->put_AdditionalBrowserArguments(kBrowserArgs);
+	options->put_AdditionalBrowserArguments(BrowserArgs().c_str());
 
 	HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(useFixed ? fixedDir.c_str() : nullptr, dataDir.c_str(), options.Get(),
 		Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
@@ -813,6 +833,22 @@ public:
 		return Ret(result, true);
 	}
 	STDMETHOD(GetShortcutLockModes)(VARIANT_BOOL* result) { return Ret(result, m_shortcutLock); }
+
+	/**
+	 * 창 가림 감지 켜기/끄기 (기본 켜짐). PC 에 저장되고, 브라우저 인자라서 다음 실행부터 적용된다
+	 * (같은 프로세스의 에디터는 처음 만든 WebView2 를 함께 쓴다). 디버거로 멈출 때 화면이 비면 끈다.
+	 */
+	STDMETHOD(SetOcclusionDetection)(VARIANT_BOOL on, VARIANT_BOOL* result) {
+		CRegKey key;
+		LONG rc = key.Create(HKEY_CURRENT_USER, kSettingsKey);
+		if (rc == ERROR_SUCCESS) rc = key.SetDWORDValue(kOcclusionValue, on != VARIANT_FALSE ? 1 : 0);
+		if (rc != ERROR_SUCCESS) {
+			Fail(L"설정을 저장하지 못했습니다" + HrText(HRESULT_FROM_WIN32(rc)));
+			return Ret(result, false);
+		}
+		return Ret(result, true);
+	}
+	STDMETHOD(GetOcclusionDetection)(VARIANT_BOOL* result) { return Ret(result, OcclusionDetectionSetting()); }
 
 	/** 복구용 자동 저장. 기본 true. 바꾼 값은 PC 에 저장되어 다음 실행에도 쓰인다 (끄면 남은 복구본도 지움) */
 	STDMETHOD(get_RecoveryEnabled)(VARIANT_BOOL* value) {
